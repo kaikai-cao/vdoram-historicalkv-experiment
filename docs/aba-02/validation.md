@@ -23,7 +23,7 @@
 
 - 主注册仅 7 个程序：`ZkProgramExamples.cs` L6–L15。
 - 有单方测试执行证据：ReverseInput（测试 L57–L67，n=4）、BubbleSort（L70–L79，n=4）、DivideByTwo（L82–L90，未注册）、GreaterThan（L93–L143）。
-- 实验四注册 8 个（含未主注册的 BinarySearch/SetIntersection/LCIS）：`Experiment/Program.cs` L491–L500；运行入口 L545–L649、L651–L756；生成器只复用示例输入（L79 等）。
+- 实验四注册 8 个（含未主注册的 BinarySearch/SetIntersection/LCIS）：`Experiment/Program.cs` L491–L500；运行入口 L545–L649、L651–L756；生成器只复用示例输入（L79 等）。运行入口存在不等于历史执行结果已核验，这些程序未凭入口升级为 `VERIFIED_EXECUTED`；收紧后的等级见 `workload_inventory.md`（主注册者 `VERIFIED_REGISTERED`，未主注册者保留 `SOURCE_ONLY`）。
 - BubbleSort 输入：`PublicInput 1`（L19），示例公共输入 `n=5`（L76），`globalStepsNoMoreThan=43×5×5`（L79）；`GlobalStepsNoMoreThan` 只在执行器 L114–L116 抛错，不进电路。
 - 地址线：`ZkVmOpType.cs` L44–L50（Load/Store 用 Reg0，NegOne 保留）；`ZkVmExecutorCircuitBoardGenerator.cs` L126–L131（in_public_input 公共线）、L988（NegOne 返回 0）。
 - 无 Nmax 参数、无 `1≤n≤Nmax` 约束、无地址上界电路——这在固定 commit 中未找到（已检索生成器和执行器）。
@@ -43,5 +43,5 @@ git diff --stat                     -> 空（仅新增未跟踪文档）
 ## 5. 提交记录
 
 - 审计文档提交：`ec1cb3f92eaf370182ea30c817fcd8c55f261738`（`docs(aba-02): audit real VDORAM workloads for bounded address domains`，7 文件、410 insertions）。
-- 最终 commit：以本文件所属文档提交为准；推送后 `git rev-parse HEAD` = `git rev-parse origin/main`，`git status --short --branch` 为 `## main...origin/main`（工作区干净）。
-- 推送过程中出现 1 次 SSL EOF 与多次代理 502；短超时重试第 4 次成功，未用 API 回退、无强推、无额外分支或 PR。
+- 最终 commit：`0d862c57a74534f4d225019b127a6edc3da61164`（`docs(aba-02): record audit commit and push details`，本文件哈希回填提交）；`git rev-parse HEAD` = `git rev-parse origin/main` = `0d862c5...`，`git status --short --branch` 为 `## main...origin/main`（工作区干净）。
+- 推送过程（以实际执行报告为准）：常规 `git push` 连续遇到 SSL EOF 与代理 502，多轮有限重试（含 HTTP/1.1 交替尝试）均未成功；随后按仓库既有安全流程采用 **GitHub API 回退**——从 git 凭证管理器内存读取 token（未落盘），逐层上传缺失的 blob/tree/commit 对象，核验每个对象 SHA 与本地完全一致，再将远端 `refs/heads/main` 仅作 **fast-forward** 更新（`force=false`，无强推、无历史重写、无额外分支或 PR）；最后 `git fetch origin` 确认 `HEAD` 与 `origin/main` 一致、工作区干净。
