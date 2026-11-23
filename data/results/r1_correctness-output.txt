@@ -1,0 +1,19 @@
+test_r1_01_fetch_count_identical_all_noninitial_steps (tests.test_fetch_r1.FetchWorkloadConsistencyTests.test_r1_01_fetch_count_identical_all_noninitial_steps)
+R1-1: both models Fetch exactly T-1 times; step 0 is zeroShare. ... ok
+test_r1_02_store_step_executes_fetch (tests.test_fetch_r1.FetchWorkloadConsistencyTests.test_r1_02_store_step_executes_fetch)
+R1-2: a STORE still incurs one Fetch; value is not consumed. ... ok
+test_r1_03_noop_step_executes_fetch (tests.test_fetch_r1.FetchWorkloadConsistencyTests.test_r1_03_noop_step_executes_fetch)
+R1-3: a NOOP at a non-initial step still incurs one Fetch. ... ok
+test_r1_04_noop_fetch_input_differs_from_trace_sentinel (tests.test_fetch_r1.FetchWorkloadConsistencyTests.test_r1_04_noop_fetch_input_differs_from_trace_sentinel)
+R1-4: NOOP fetch_address (ordinary) != trace_address (NegOne). ... ok
+test_r1_05_identical_fetch_results_per_address (tests.test_fetch_r1.FetchWorkloadConsistencyTests.test_r1_05_identical_fetch_results_per_address)
+R1-5: for the same fetch_address sequence E0/E1 return same values ... ok
+test_r1_06_deleted_row_with_stale_commitment_fails_hash_count (tests.test_fetch_r1.FetchWorkloadConsistencyTests.test_r1_06_deleted_row_with_stale_commitment_fails_hash_count)
+R1-6: deleting a historical row but KEEPING the original ... ok
+test_r1_07_all16_r1_traces_consistent (tests.test_fetch_r1.FetchWorkloadConsistencyTests.test_r1_07_all16_r1_traces_consistent)
+Cross-check: all 16 R1 traces keep E0/E1/oracle consistent. ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.278s
+
+OK

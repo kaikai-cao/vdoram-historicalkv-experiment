@@ -17,6 +17,9 @@ class Oracle:
         self.expected_returns: list[int] = []
 
     def execute_step(self, op: str, address: int, value, step: int) -> int:
+        # Memory state is keyed by the trace address (out_trace_mem_addr):
+        # for LOAD/STORE it equals reg0 = the actual memory address; NOOP does
+        # not touch state. This matches how E0/E1 replay_state key historical rows.
         if op == "NOOP":
             ret = 0
         elif op == "LOAD":
@@ -29,7 +32,10 @@ class Oracle:
 
     def run(self, trace: list[dict]) -> list[int]:
         for rec in trace:
-            self.execute_step(rec["op"], rec["address"], rec.get("value"), rec["step"])
+            # R1 traces carry trace_address for the memory key; legacy traces
+            # use the single `address` field.
+            addr = rec.get("trace_address", rec.get("address"))
+            self.execute_step(rec["op"], addr, rec.get("value"), rec["step"])
         return self.expected_returns
 
     def final_state(self) -> dict[int, int]:

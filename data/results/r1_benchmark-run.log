@@ -1,0 +1,22 @@
+raw       -> D:\Research\vdoram-historicalkv-experiment\data\results\r1_benchmark_raw.csv (320 rows)
+summary   -> D:\Research\vdoram-historicalkv-experiment\data\results\r1_benchmark_summary.csv (32 groups)
+fetch seq -> D:\Research\vdoram-historicalkv-experiment\data\results\r1_fetch_sequence_evidence.json
+all correctness + fetch-sequence flags: True
+
+   N     T  fetch   E0_q_ms   E1_q_ms   ratio  E0_scan E1_lookup
+  64   128    127    0.0840    0.0089   9.44x     2921       127
+  64   256    255    0.2637    0.0179  14.77x    10046       255
+  64   512    511    0.7971    0.0355  22.42x    32001       511
+  64  1024   1023    2.5760    0.0696  37.01x   104830      1023
+ 128   128    127    0.0946    0.0092  10.28x     3378       127
+ 128   256    255    0.2914    0.0172  16.94x    11507       255
+ 128   512    511    0.9408    0.0372  25.29x    38140       511
+ 128  1024   1023    3.1817    0.0734  43.35x   131575      1023
+ 256   128    127    0.0986    0.0094  10.55x     3484       127
+ 256   256    255    0.3029    0.0175  17.36x    11769       255
+ 256   512    511    1.0348    0.0351  29.44x    42409       511
+ 256  1024   1023    3.6482    0.0712  51.24x   149703      1023
+ 512   128    127    0.0966    0.0090  10.73x     3531       127
+ 512   256    255    0.2980    0.0171  17.38x    11923       255
+ 512   512    511    1.0451    0.0341  30.69x    44248       511
+ 512  1024   1023    3.7632    0.0727  51.76x   159816      1023

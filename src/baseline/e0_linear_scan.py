@@ -69,6 +69,7 @@ class E0LinearScan:
         self.queries: int = 0
         self.query_time_s: float = 0.0      # pure fetch (linear scan) time
         self.actual_returns: list[int] = []
+        self.fetch_addresses: list[int] = []  # R1: exact Fetch input sequence
 
     def fetch(self, address: int) -> tuple[int, int]:
         """Full-history scan, latest match wins, no match -> 0.
@@ -87,24 +88,46 @@ class E0LinearScan:
         self.query_time_s += time.perf_counter() - t0
         self.scanned_rows += scanned
         self.queries += 1
+        self.fetch_addresses.append(address)
         return value, scanned
 
-    def execute_step(self, op: str, address: int, value, step: int) -> int:
-        # VDORAM runs the Fetch circuit at every step where a memory address is
-        # presented. For NOOP the address is NegOne and no match exists -> 0.
-        if op == "NOOP":
+    def execute_step(self, op: str, fetch_address: int, trace_address: int,
+                     value, step: int) -> int:
+        """R1: run Fetch on EVERY non-initial step (ZkProgramExecutor L205-236).
+
+        - step 0: `memVal = zeroShare`; no Fetch circuit is built/run.
+        - step > 0: Fetch circuit runs with in_mem_addr = reg0 = ``fetch_address``
+          for ALL ops (LOAD / STORE / NOOP). The full-history scan cost is
+          incurred even when the VM does not consume the returned value.
+        - The Fetch result is used only by LOAD (in_mem_val -> out_mem_val).
+          STORE returns the write value; NOOP returns 0.
+        - The historical row is keyed by ``trace_address`` (= out_trace_mem_addr:
+          actual addr for LOAD/STORE, NegOne for NOOP), which is a DIFFERENT
+          concept from the Fetch input address.
+        """
+        if step == 0:
+            fetched = 0                      # zeroShare; Fetch circuit not run
+        else:
+            fetched, _ = self.fetch(fetch_address)
+
+        if op == "LOAD":
+            returned = fetched
+        elif op == "STORE":
+            returned = int(value)            # Fetch ran, result unused by STORE
+        else:  # NOOP: Fetch ran, result unused
             returned = 0
-        elif op == "LOAD":
-            returned, _ = self.fetch(address)
-        else:  # STORE: VM computes out_mem_val = value; fetch not needed for result.
-            returned = int(value)
-        self.history.append(make_row(op, address, step, returned))
+        self.history.append(make_row(op, trace_address, step, returned))
         self.actual_returns.append(returned)
         return returned
 
     def run(self, trace: list[dict]) -> dict:
         for rec in trace:
-            self.execute_step(rec["op"], rec["address"], rec.get("value"), rec["step"])
+            # R1 records carry separate fetch_address / trace_address. Fall back
+            # to the legacy single `address` field for the original 16 traces so
+            # the original 12 correctness tests keep working unchanged.
+            fa = rec.get("fetch_address", rec.get("address"))
+            ta = rec.get("trace_address", rec.get("address"))
+            self.execute_step(rec["op"], fa, ta, rec.get("value"), rec["step"])
         return self.summary()
 
     def final_state(self) -> dict[int, int]:
@@ -122,6 +145,7 @@ class E0LinearScan:
             "scanned_rows": self.scanned_rows,
             "queries": self.queries,
             "query_time_s": self.query_time_s,
+            "fetch_addresses": list(self.fetch_addresses),
         }
 
 

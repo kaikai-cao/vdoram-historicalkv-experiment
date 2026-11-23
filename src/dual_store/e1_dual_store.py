@@ -30,12 +30,14 @@ class CurrentStateStore:
         self._data: dict[int, int] = {}
         self.lookups: int = 0
         self.read_time_s: float = 0.0
+        self.read_addresses: list[int] = []  # R1: exact lookup input sequence
 
     def read(self, address: int) -> int:
         t0 = time.perf_counter()
         value = self._data.get(address, 0)
         self.read_time_s += time.perf_counter() - t0
         self.lookups += 1
+        self.read_addresses.append(address)
         return value
 
     def write(self, address: int, value: int) -> None:
@@ -146,28 +148,46 @@ class E1DualStore:
         self.log = HistoricalLog()
         self.actual_returns: list[int] = []
 
-    def execute_step(self, op: str, address: int, value, step: int) -> int:
-        # 1. read old value (for Load) -- for Store we still read to keep fixed order
-        old = self.current.read(address)
-        # 2. compute return value
+    def execute_step(self, op: str, fetch_address: int, trace_address: int,
+                     value, step: int) -> int:
+        """R1: one Fetch-equivalent lookup on EVERY non-initial step, like E0.
+
+        - step 0: zeroShare special case; no lookup (matches E0 / source L205-207).
+        - step > 0: exactly one CurrentStateStore.read(fetch_address), for ALL
+          ops -- including STORE and NOOP whose return value does not use it.
+          This mirrors the Fetch circuit always running with in_mem_addr=reg0.
+        - The read result is consumed only by LOAD; STORE returns the write value,
+          NOOP returns 0.
+        - State writes and the historical row are keyed by ``trace_address``
+          (= out_trace_mem_addr), NOT by the Fetch input address. For NOOP the
+          two differ: fetch_address is an ordinary address, trace_address=NegOne.
+        """
+        if step == 0:
+            old = 0                              # zeroShare; no lookup
+        else:
+            old = self.current.read(fetch_address)
+
         if op == "NOOP":
             returned = 0
         elif op == "LOAD":
             returned = old
         else:
             returned = int(value)
-        # 3. update current state
+
         if op == "STORE":
-            self.current.write(address, returned)
+            self.current.write(trace_address, returned)
         # Load/NOOP: M_{t+1}[a] = M_t[a], no write
-        # 4. append historical row (after state update; row records the effect)
-        self.log.append(make_row(op, address, step, returned))
+
+        self.log.append(make_row(op, trace_address, step, returned))
         self.actual_returns.append(returned)
         return returned
 
     def run(self, trace: list[dict]) -> dict:
         for rec in trace:
-            self.execute_step(rec["op"], rec["address"], rec.get("value"), rec["step"])
+            # R1: separated addresses; legacy `address` fallback for old traces.
+            fa = rec.get("fetch_address", rec.get("address"))
+            ta = rec.get("trace_address", rec.get("address"))
+            self.execute_step(rec["op"], fa, ta, rec.get("value"), rec["step"])
         return self.summary()
 
     def final_state(self) -> dict[int, int]:
@@ -179,5 +199,6 @@ class E1DualStore:
             "hash_lookups": self.current.lookups,
             "queries": self.current.lookups,
             "query_time_s": self.current.read_time_s,
+            "fetch_addresses": list(self.current.read_addresses),
             "integrity_ok": self.log.check_order_and_integrity()[0],
         }
