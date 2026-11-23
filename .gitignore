@@ -1,0 +1,17 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Temporary download artifacts
+data/_tree.json.tmp
+*.tmp
+
+# OS files
+Thumbs.db
+.DS_Store
