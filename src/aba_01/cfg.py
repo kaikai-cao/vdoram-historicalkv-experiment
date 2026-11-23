@@ -103,7 +103,7 @@ def _s(op: str, a0: int = 0, a1: int = 0, a2: int = 0) -> Instr:
     return Instr(op, a0, a1, a2)
 
 
-# Transcribed from source_semantics.md section 1 (42 instructions, PC 0..42).
+# Transcribed from source_semantics.md section 1 (43 instructions, PC 0..42).
 BUBBLE_SORT_INSTRUCTIONS: tuple[Instr, ...] = (
     _s("Set", 15, 1),                 # 0
     _s("PublicInput", 1),             # 1  n -> R1

@@ -11,7 +11,7 @@
 
 | 文件 | 内容 |
 | --- | --- |
-| `docs/aba-01/source_semantics.md` | 固定 commit 源码语义、42 条指令 PC、6 条 Load/Store 的 R0 来源、循环结构、VM 指令语义、n 约束缺失证据 |
+| `docs/aba-01/source_semantics.md` | 固定 commit 源码语义、43 条指令 PC 0–42、6 条 Load/Store 的 R0 来源、循环结构、VM 指令语义、n 约束缺失证据 |
 | `docs/aba-01/invariants.md` | CFG、B1–B4 不变量、交换/不交换分支、n=0/1/Nmax/>Nmax、末次迭代 |
 | `docs/aba-01/field_soundness.md` | 模数/位宽、LessThan 规范整数语义、无回绕/下溢逐项分析、四类条件区分 |
 | `docs/aba-01/certificate_format.md` | schema、生成/检查规则、实际样例、负向映射、边界声明 |
@@ -43,7 +43,7 @@
 status: PASS
 scope: STATIC_CERTIFICATE_PROTOTYPE
 program_hash: sha256:2a91193fef2fb08ceccd92b9664444a4152c6fec806e51f8005de8b74d2741a6
-instruction_count: 42
+instruction_count: 43
 nmax: 16
 field: 0x12ab655e9a2ca55660b44d1e5c37b00159aa76fed00000010a11800000000001, bit_size=253
 PC4  Store  [0, n-1] PASS   R0 = input-loop counter, init 0, +1 per iteration

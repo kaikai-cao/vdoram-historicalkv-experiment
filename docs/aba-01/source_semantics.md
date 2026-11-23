@@ -8,7 +8,7 @@
 
 ## 1. 程序指令序列（PC = 指令下标）
 
-来源：`CompatCircuit/CollaborativeZkVm/ZkPrograms/Examples/BubbleSortProgramGenerator.cs` L16–L74。共 42 条，PC 0–42（Halt 为 PC 42）。
+来源：`CompatCircuit/CollaborativeZkVm/ZkPrograms/Examples/BubbleSortProgramGenerator.cs` L16–L74。共 43 条，PC 0–42（Halt 为 PC 42）。
 
 | PC | 指令 | 源码行 | 说明（源码注释） |
 | --- | --- | --- | --- |
