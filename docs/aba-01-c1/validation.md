@@ -94,4 +94,6 @@ Windows `core.autocrlf` 对未触碰的历史 `data/traces/*.jsonl` 给出 LF→
 
 ## 8. 提交记录
 
-（提交并推送后在此填写最终 commit；`git rev-parse HEAD` 与 `git rev-parse origin/main` 一致，工作区干净。）
+- 实现提交：`484230eb0d907bfdba60fb290d48b04d7fbd3801`（`fix(aba-01-c1): harden analyzer and independent certificate checker`，10 文件，782 insertions / 95 deletions）。
+- 最终 commit：以本文件所属文档提交为准；推送后 `git rev-parse HEAD` = `git rev-parse origin/main`，`git status --short --branch` 为 `## main...origin/main`（工作区干净）。
+- 首次 `git push origin main` 遇到代理 `CONNECT tunnel failed, 502`；短超时重试第 1 次即成功，无 API 回退、无强推、无额外分支或 PR。
