@@ -166,26 +166,30 @@ def e1b_total_by_sum(T: int, n: int, store_steps: set[int], p: CostParams,
 
 def e1a_total_closed(T: int, n: int, store_steps: set[int], p: CostParams,
                      share_eq: bool = True) -> int:
-    if T <= 0 or n <= 0:
+    # R1-C1: append fires once per step (incl. step 0), so T*append_mults,
+    # matching e1a_total_by_sum. n<=0 is outside the model domain, but we keep
+    # the same behaviour as the stepwise form (fetch=0, upd=0, append still T).
+    if T <= 0:
         return 0
     fetch = p.fetch_a(n)
     w0 = 1 if 0 in store_steps else 0
     wpos = sum(1 for s in store_steps if 0 <= s < T and s > 0)
     upd0 = w0 * n * p.c_upd_separate
     updpos = wpos * n * (p.c_upd_shared if share_eq else p.c_upd_separate)
-    return (T - 1) * fetch + upd0 + updpos + (T - 1) * p.append_mults
+    return (T - 1) * fetch + upd0 + updpos + T * p.append_mults
 
 
 def e1b_total_closed(T: int, n: int, store_steps: set[int], p: CostParams,
                      share_eq: bool = True) -> int:
-    if T <= 0 or n <= 0:
+    # R1-C1: see e1a_total_closed — append count is T, not T-1.
+    if T <= 0:
         return 0
     fetch = p.fetch_b(n)
     w0 = 1 if 0 in store_steps else 0
     wpos = sum(1 for s in store_steps if 0 <= s < T and s > 0)
     upd0 = w0 * n * p.c_upd_separate
     updpos = wpos * n * (p.c_upd_shared if share_eq else p.c_upd_separate)
-    return (T - 1) * fetch + upd0 + updpos + (T - 1) * p.append_mults
+    return (T - 1) * fetch + upd0 + updpos + T * p.append_mults
 
 
 def cross_threshold_n(T: int, store_steps: set[int], variant: str,
@@ -193,19 +197,40 @@ def cross_threshold_n(T: int, store_steps: set[int], variant: str,
     """Continuous n upper bound for E1_X < E0, derived from exact sums.
 
     variant: 'A' or 'B'. Returns 0.0 for T<=1. Not an empirical threshold.
+
+    R1-C1 correction — carry fetch linear coefficient AND constant term
+    explicitly instead of using fetch_a(1) as the coefficient:
+
+        K   = c_eq + c_sel + lowbit_not + lowbit_and   (= 393)
+        b   = lowbit_and                              (= 2)
+        A0  = C_E0(T) = K*T*(T-1)/2 - b*(T-1)
+        E1-A fetch(n) =  K*n - b      -> f_x=K,     c_x=-b
+        E1-B fetch(n) = (c_eq+c_sel)*n -> f_x=390,  c_x= 0
+        U   = w0*c_upd_separate + wpos*upd_per_pos   (update mults per slot)
+
+        C_E1_X < C_E0  <=>  n < [A0 - c_x*(T-1)] / [f_x*(T-1) + U]
+
+    Read-only checks: variant A -> n < T/2; variant B -> n < (393T-4)/780.
     """
     if T <= 1:
         return 0.0
-    fetch_coef = p.fetch_a(1) if variant == "A" else p.fetch_b(1)
-    # fetch_X(n) = fetch_coef*n + const; const cancels at exact-cross derivation
+    K = p.c_eq + p.c_sel + p.lowbit_not + p.lowbit_and
+    b = p.lowbit_and
+    a0 = K * T * (T - 1) // 2 - b * (T - 1)
+    if variant == "A":
+        fx, cx = K, -b
+    elif variant == "B":
+        fx, cx = p.c_eq + p.c_sel, 0
+    else:
+        raise ValueError(f"unknown variant: {variant}")
     w0 = 1 if 0 in store_steps else 0
     wpos = sum(1 for s in store_steps if 0 <= s < T and s > 0)
     upd_per_pos = p.c_upd_shared if share_eq else p.c_upd_separate
-    denom = (T - 1) * fetch_coef + w0 * p.c_upd_separate + wpos * upd_per_pos
+    U = w0 * p.c_upd_separate + wpos * upd_per_pos
+    numer = a0 - cx * (T - 1)
+    denom = fx * (T - 1) + U
     if denom <= 0:
         return float("inf")
-    K = p.c_eq + p.c_sel + 3
-    numer = K * T * (T - 1) // 2 - p.lowbit_and * (T - 1)
     return numer / denom
 
 

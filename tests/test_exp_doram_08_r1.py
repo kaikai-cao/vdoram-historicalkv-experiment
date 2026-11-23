@@ -144,23 +144,84 @@ class TestTotalsAndClosedForms(unittest.TestCase):
                          (T - 1) * (3 * n - 2))
 
     def test_three_models_common_append(self):
-        # append_mults is a common additive term; with default 0 it cancels.
+        # R1-C1: history append fires at EVERY step (incl. step 0), verified from
+        # ZkProgramExecutor.cs L116 (loop from 0) + L405 (AddMemoryTrace each step).
+        # All three models must gain exactly T*append_mults, and stepwise == closed.
         p2 = CostParams(append_mults=7)
         T = 10
         self.assertEqual(e0_total_closed(T, p2) - e0_total_closed(T, P), T * 7)
-        steps = set()
-        self.assertEqual(e1b_total_closed(T, 8, steps, p2) - e1b_total_closed(T, 8, steps, P),
-                         (T - 1) * 7)
+        for steps in (set(), {0}, {1}, {0, 3, 7}):
+            self.assertEqual(e0_total_by_sum(T, p2), e0_total_closed(T, p2))
+            for fn_sum, fn_cls in ((e1a_total_by_sum, e1a_total_closed),
+                                   (e1b_total_by_sum, e1b_total_closed)):
+                self.assertEqual(fn_sum(T, 8, steps, p2), fn_cls(T, 8, steps, p2))
+                self.assertEqual(fn_cls(T, 8, steps, p2) - fn_cls(T, 8, steps, P),
+                                 T * 7)
+
+    def test_append_step0_store_not_omitted(self):
+        # A STORE at step 0 must still carry its history-append cost.
+        p2 = CostParams(append_mults=7)
+        T, n = 6, 5
+        for variant, fn_sum, fn_cls in (("A", e1a_total_by_sum, e1a_total_closed),
+                                        ("B", e1b_total_by_sum, e1b_total_closed)):
+            self.assertEqual(fn_sum(T, n, {0}, p2), fn_cls(T, n, {0}, p2))
+            self.assertEqual(fn_cls(T, n, {0}, p2) - fn_cls(T, n, {0}, P), T * 7)
+            self.assertEqual(fn_cls(1, n, {0}, p2) - fn_cls(1, n, {0}, P), 7)
+
+
+class TestAppendBoundary(unittest.TestCase):
+    """R1-C1: stepwise/closed consistency at T=0,1,2 and append on/off."""
+
+    def test_append_T0_T1_T2(self):
+        for am in (0, 7):
+            p = CostParams(append_mults=am)
+            for T in (0, 1, 2):
+                self.assertEqual(e0_total_by_sum(T, p), e0_total_closed(T, p))
+                for n in (1, 4, 16):
+                    for steps in (set(), {0}, {0, 1}):
+                        self.assertEqual(e1a_total_by_sum(T, n, steps, p),
+                                         e1a_total_closed(T, n, steps, p))
+                        self.assertEqual(e1b_total_by_sum(T, n, steps, p),
+                                         e1b_total_closed(T, n, steps, p))
+            self.assertEqual(e0_total_closed(1, p), am)  # no fetch at step 0, one append
+            # step1 fetch_e0(1) = 393*1-2 = 391, plus 2 appends
+            self.assertEqual(e0_total_closed(2, p), 391 + 2 * am)
 
 
 class TestCrossThreshold(unittest.TestCase):
-    def test_read_only_threshold_near_half(self):
+    def test_read_only_threshold_exact(self):
+        # R1-C1: exact symbolic crossovers, not a delta=1.0 approximation.
+        for T in (2, 32, 64, 128, 1024, 4096):
+            thrA = cross_threshold_n(T, set(), "A", P)
+            thrB = cross_threshold_n(T, set(), "B", P)
+            self.assertAlmostEqual(thrA, T / 2, places=9)
+            self.assertAlmostEqual(thrB, (393 * T - 4) / 780, places=9)
+            self.assertGreater(thrB, thrA)  # E1-B has no -2 fetch constant
+
+    def test_cross_threshold_predicts_readonly_winner(self):
+        # Cross conditions must agree with the actual closed-form sums.
         T = 64
-        thrA = cross_threshold_n(T, set(), "A", P)
-        thrB = cross_threshold_n(T, set(), "B", P)
-        # E1-B slightly more permissive than E1-A
-        self.assertGreater(thrB, thrA)
-        self.assertAlmostEqual(thrA, T / 2, delta=1.0)
+        e0 = e0_total_closed(T, P)
+        for n in (8, 16, 31, 32, 33, 48, 64):
+            self.assertEqual(e1a_total_closed(T, n, set(), P) < e0,
+                             n < T / 2, f"E1-A n={n}")
+            self.assertEqual(e1b_total_closed(T, n, set(), P) < e0,
+                             n < (393 * T - 4) / 780, f"E1-B n={n}")
+
+    def test_mixed_rw_threshold_matches_parameterised_formula(self):
+        T = 128
+        K, b = 393, 2
+        a0 = K * T * (T - 1) // 2 - b * (T - 1)
+        steps = set(range(T))  # step0 + (T-1) positive STOREs
+        U_shared = P.c_upd_separate + (T - 1) * P.c_upd_shared
+        U_sep = T * P.c_upd_separate
+        exp_sh = (a0 + b * (T - 1)) / (K * (T - 1) + U_shared)
+        exp_se = (a0 + b * (T - 1)) / (K * (T - 1) + U_sep)
+        self.assertAlmostEqual(cross_threshold_n(T, steps, "A", P, True), exp_sh, places=9)
+        self.assertAlmostEqual(cross_threshold_n(T, steps, "A", P, False), exp_se, places=9)
+        self.assertLess(exp_se, exp_sh)  # expensive updates shrink E1 advantage
+        # read-only is the most permissive case
+        self.assertGreater(cross_threshold_n(T, set(), "A", P), exp_sh)
 
     def test_writes_lower_threshold(self):
         T = 128

@@ -36,6 +36,7 @@ EQ_RATIOS = [1, 389]           # 389 = source-derived; 1 = ASSUMED stress case
 UPD_RATIOS = [2, 100]          # 2 = source-derived (R1-1 c_upd_shared); 100 = ASSUMED stress
 STATUS_DERIVED = "DERIVED"
 STATUS_ASSUMED = "ASSUMED"
+MODEL_VERSION = "R1-C1"  # R1-C1: corrected crossover + unified append closed form
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.path.normpath(os.path.join(HERE, "..", "..", "results", "exp_doram_08_r1"))
@@ -78,11 +79,11 @@ def gen_symbolic_costs() -> int:
     """One row per (variant,T,n,store_ratio,update_mode) at source-derived params."""
     path = os.path.join(RESULTS, "symbolic_costs.csv")
     cols = [
-        "model_variant", "T", "n", "store_ratio", "store_step_strategy",
-        "update_mode", "c_eq", "c_sel", "c_upd", "c_upd_separate",
-        "parameter_status", "e0_cost", "e1_cost", "cost_ratio_e1_over_e0",
-        "winner", "fetch_cost", "update_cost", "linear_ops_e1", "rounds_e1",
-        "preproc_elems_e1", "online_elems_e1",
+        "model_version", "model_variant", "T", "n", "store_ratio",
+        "store_step_strategy", "update_mode", "c_eq", "c_sel", "c_upd",
+        "c_upd_separate", "parameter_status", "e0_cost", "e1_cost",
+        "cost_ratio_e1_over_e0", "winner", "fetch_cost", "update_cost",
+        "linear_ops_e1", "rounds_e1", "preproc_elems_e1", "online_elems_e1",
     ]
     rows = []
     p = CostParams()
@@ -106,6 +107,7 @@ def gen_symbolic_costs() -> int:
                 upd = w0 * n * p.c_upd_separate + wpos * n * (
                     p.c_upd_shared if share_eq else p.c_upd_separate)
                 rows.append({
+                    "model_version": MODEL_VERSION,
                     "model_variant": variant,
                     "T": T, "n": n, "store_ratio": ratio,
                     "store_step_strategy": strategy,
@@ -133,11 +135,11 @@ def gen_sensitivity_raw() -> int:
     """Parameter sweep with ASSUMED weight regimes."""
     path = os.path.join(RESULTS, "sensitivity_raw.csv")
     cols = [
-        "model_variant", "T", "n", "store_ratio", "store_step_strategy",
-        "update_mode", "eq_ratio", "upd_ratio", "c_eq", "c_sel", "c_upd",
-        "c_upd_separate", "parameter_status", "e0_cost", "e1_cost",
-        "cost_ratio_e1_over_e0", "winner", "threshold_n_continuous",
-        "fetch_cost", "update_cost",
+        "model_version", "model_variant", "T", "n", "store_ratio",
+        "store_step_strategy", "update_mode", "eq_ratio", "upd_ratio",
+        "c_eq", "c_sel", "c_upd", "c_upd_separate", "parameter_status",
+        "e0_cost", "e1_cost", "cost_ratio_e1_over_e0", "winner",
+        "threshold_n_continuous", "fetch_cost", "update_cost",
     ]
     rows = []
     for T, n, ratio, variant, mode, eqr, upr in product(
@@ -158,6 +160,7 @@ def gen_sensitivity_raw() -> int:
         upd = w0 * n * p.c_upd_separate + wpos * n * (
             p.c_upd_shared if share_eq else p.c_upd_separate)
         rows.append({
+            "model_version": MODEL_VERSION,
             "model_variant": variant, "T": T, "n": n,
             "store_ratio": ratio, "store_step_strategy": "uniform",
             "update_mode": mode, "eq_ratio": eqr, "upd_ratio": upr,
@@ -189,10 +192,10 @@ def gen_sensitivity_summary() -> int:
                r["eq_ratio"], r["upd_ratio"])
         groups.setdefault(key, []).append(r)
     cols = [
-        "model_variant", "store_ratio", "update_mode", "eq_ratio", "upd_ratio",
-        "parameter_status", "cells", "wins_e1", "losses_e1", "ties",
-        "median_cost_ratio", "min_cost_ratio", "max_cost_ratio",
-        "wins_Tn_ge_4", "wins_Tn_le_1", "losses_Tn_le_1",
+        "model_version", "model_variant", "store_ratio", "update_mode",
+        "eq_ratio", "upd_ratio", "parameter_status", "cells", "wins_e1",
+        "losses_e1", "ties", "median_cost_ratio", "min_cost_ratio",
+        "max_cost_ratio", "wins_Tn_ge_4", "wins_Tn_le_1", "losses_Tn_le_1",
     ]
     out = []
     for key, rs in sorted(groups.items()):
@@ -207,6 +210,7 @@ def gen_sensitivity_summary() -> int:
         le1_wins = sum(1 for x in le1 if x["winner"] == "E1")
         le1_losses = sum(1 for x in le1 if x["winner"] == "E0")
         out.append({
+            "model_version": MODEL_VERSION,
             "model_variant": variant, "store_ratio": ratio,
             "update_mode": mode, "eq_ratio": eqr, "upd_ratio": upr,
             "parameter_status": rs[0]["parameter_status"],
