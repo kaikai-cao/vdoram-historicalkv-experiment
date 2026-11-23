@@ -5,9 +5,11 @@
 
 ## 0. 一句话结论
 
-**机制层面：可以（VERIFIED for registers / INFERRED for ORAM）。** VDORAM 的 `thisRegisters` 份额由外层执行器持有、跨 session 传递、每步作为 `in_this_reg_{i}` 输入、输出份额 `out_reg_{i}` 写回，并以公开 hash 承诺链约束连续性——ORAM 状态份额可依**同一模式**承载。**EXP-DORAM-02 中"session 注销 → 份额全部销毁 → ORAM 状态无法跨步"的推理被撤回（见 §3）。**
+**机制层面：可以（VERIFIED for registers / INFERRED for ORAM）。** VDORAM 的 `thisRegisters` 份额由外层执行器持有、跨 session 传递、每步作为 `in_this_reg_{i}` 输入、输出份额 `out_reg_{i}` 写回，并以公开 hash 做**执行器宿主层的跨步一致性检查**——ORAM 状态份额可依**同一模式**承载。**EXP-DORAM-02 中"session 注销 → 份额全部销毁 → ORAM 状态无法跨步"的推理被撤回（见 §3）。**
 
-**仍未验证：ORAM 状态表示规模、转换电路构造、承诺更新与 SNARK 约束、任意方兼容（UNKNOWN，见 §6）。** 这不是"不可能"，而是"尚未解决"。
+**⚠️ 证明层限定（R1 补充核查，见 `verifier-chain-check.md`）**：执行器做了 hash 检查 ≠ 恶意 prover 的公开证明被 verifier 强制约束；回调只把 R1CS+witness **落盘**（单方另加 `SelfVerify()` 自检），协作证明是外部 Rust 工具**逐电路手动运行**；本仓库内**未发现** verifier 对跨电路公开输出串联、步数连续性或初始/最终状态锚点的检查。因此本文所有"防替换/跳步/回滚""进入协作证明"仅在**执行器机制/接口层面**成立，**公开证明层的安全保证待核实/本仓库未提供**。
+
+**仍未验证：ORAM 状态表示规模、转换电路构造、承诺更新与 SNARK 约束、verifier 跨电路检查、任意方兼容（UNKNOWN，见 §6）。** 这不是"不可能"，而是"尚未解决"。
 
 ---
 
@@ -24,7 +26,7 @@
 | `ZkProgramExecutor.cs` | L363-365 | `thisProgramCounter = privOutProgramCounter` — pc 份额同模式 | VERIFIED |
 | `ZkProgramExecutor.cs` | L322-328 | `out_hash_this_registers` vs `hashThisRegisters` 一致性检查 — **输入侧承诺校验** | VERIFIED |
 | `ZkProgramExecutor.cs` | L367-371 | `hashThisRegisters = out_hash_next_registers` — **输出侧承诺更新为下一步输入** | VERIFIED |
-| `ZkProgramExecutor.cs` | L415/L590 / L23/L45-48 | `RaiseR1csCircuitWithValuesGenerated(...)` → `OnR1csCircuitWithValuesGeneratedAsync` — 每个电路的 R1CS+witness 落盘交给协作证明 | VERIFIED |
+| `ZkProgramExecutor.cs` | L415/L590 / L23/L45-48 | `RaiseR1csCircuitWithValuesGenerated(...)` → `OnR1csCircuitWithValuesGeneratedAsync` — 每个电路的 R1CS+witness 交给回调；**回调实际只落盘为 JSON**（见 `verifier-chain-check.md` §1），"交给协作证明"需外部手动步骤 | VERIFIED |
 | `MpcValue.cs`（本轮新增证据，blob `0932697ce7fc`） | 全 17 行 | `record MpcValue { Field Value; bool IsSecretShare; }` — **纯值对象，零 session/storage 引用** | VERIFIED |
 | `MpcExecutorFactory.cs` | L44-50 | `NextExecutor()` 先确认上个 executor `Completed`，再 `_prevMpcShareStorage?.UnregisterSession()`，再新建 storage+executor | VERIFIED |
 | `MpcSharedStorage.cs` | L47-55 `Dispose()` | 只清 `_partyCompleted`/`_partyOnline`/`_exposedBoolShareVectors`/`_exposedBigIntegerShareVectors` — **全是通信缓冲，无 MpcValue 份额** | VERIFIED |
@@ -47,14 +49,14 @@ hashThisRegisters: Field       (L74)
         ▼
 thisRegisters = privOutRegisters                (L376)   写回外层变量
 hashThisRegisters = out_hash_next_registers     (L370)   承诺链滚动到下一步
-RaiseR1csCircuitWithValuesGenerated(...)        (L415)   本步 R1CS+witness 入协作证明
+RaiseR1csCircuitWithValuesGenerated(...)        (L415)   本步 R1CS+witness → 回调（实际落盘，见 §9）
 ```
 
 **要点（VERIFIED）**：
 1. 份额载体是 `MpcValue`——一个 `Field` + 一个 bool 标志的**纯值对象**，不持有 session 引用（`MpcValue.cs`）。
 2. 份额**从未**存放在 `MpcSharedStorage` 里；后者只是各方之间的**消息/暴露份额交换缓冲**。`Dispose()` 清的是四个通信字典，不包括 `MpcValue`。
 3. `NextExecutor()` 注销的是上一个**通信 session ID**，与外层持有的份额无关。
-4. 跨步连续性不是靠"份额活着"自动成立，而是靠 `hashThisRegisters` 链：每步先校验**输入状态 hash 等于上一步承诺的输出 hash**（L322-328），再把输出 hash 滚动为下一步输入承诺（L367-371）。这同时防替换、跳步、回滚。
+4. 跨步连续性不是靠"份额活着"自动成立，而是靠 `hashThisRegisters` 链：每步先校验**输入状态 hash 等于上一步承诺的输出 hash**（L322-328），再把输出 hash 滚动为下一步输入承诺（L367-371）。**收紧表述**：这是**执行器宿主代码的跨步一致性检查机制**，为 ORAM 状态连续绑定提供可复用模式；但 `if (hashThisRegisters != newOutHashThisRegisters)` 是宿主代码检查，**宿主执行过 ≠ 恶意 prover 提交的独立 R1CS 证明自动包含该跨电路约束**。恶意 prover 场景下的公开验证、跳步拒绝与回滚防护，需核实 verifier 对跨电路公开输入/输出的检查逻辑——本次补充核查（§9）显示本仓库内**未发现**该检查。
 
 ## 3. 关键纠正：撤回原推理
 
@@ -64,7 +66,7 @@ RaiseR1csCircuitWithValuesGenerated(...)        (L415)   本步 R1CS+witness 入
 | "无专用 ORAM/secret-index 原语 → 理论障碍" | **收紧**（负责人第 2 点） | VERIFIED：无现成高效秘密索引接口（`SelectComposeGadget` 是固定候选线性组合）。但现有比较/乘法/加法原语**理论上可组合**出 O(N) 秘密索引电路——这是**成本与构造问题（UNKNOWN）**，不是不可绕过的理论禁止。 |
 | "2-3 方 DORAM 限制 → NO_GO" | **收紧**（负责人第 3 点） | VERIFIED：论文 p9 记录作者因任意方目标放弃当时高效 DORAM。但这是**现有方案**的限制，不推出"任意方 ORAM 不存在"或"Path ORAM 必然限方"。作为**直接插件**仍 NO_GO；一般问题 HOLD。 |
 
-> 三种香槟式结论的边界必须分开：**(a)** MPC 内部正确计算状态（份额能被电路算出来）；**(b)** SNARK 验证状态转换关系（转换本身是 R1CS 可证）；**(c)** 外部协议保证连续性与不可回滚（hash 承诺链 + 每步校验）。registers 三者具备；ORAM 的 (a) 机制可推广、(b)(c) 需新增电路与承诺但模式存在，成本与构造 UNKNOWN。
+> 三种结论的边界必须分开：**(a)** MPC 内部正确计算状态（份额能被电路算出来）；**(b)** SNARK 验证状态转换关系（转换本身是 R1CS 可证）；**(c)** 外部协议保证连续性与不可回滚（需 verifier 强制串联跨电路公开 IO）。registers 的 (a) 与**执行器层**的 hash 一致性检查 VERIFIED；**(b)(c) 的公开证明层保证在本仓库内未证实**（回调仅落盘、verifier 无跨电路串联，见 `verifier-chain-check.md`）。ORAM 的 (a) 机制可推广（INFERRED），(b)(c) 需新增电路、承诺与 verifier 约束，成本与构造 UNKNOWN。
 
 ## 4. 数据流与电路接口（本轮要求的图）
 
@@ -92,7 +94,13 @@ RaiseR1csCircuitWithValuesGenerated(...)        (L415)   本步 R1CS+witness 入
          本步 R1CS+witness ──► OnR1csCircuitWithValuesGeneratedAsync (L415/L23)
                     │
                     ▼
-         collaborative zkSNARK 验证「状态转换关系」而非仅独立承诺
+         回调实际只落盘为 *.r1cs.json（Program.cs L106-111/L211-214）
+                    │
+                    ▼
+         外部 Rust client 逐电路手动证明（prove-scripts/collaborative-zksnark-mod.md）
+                    │
+                    ▼
+         ⚠️ verifier 是否强制串联跨电路状态转换——本仓库未发现（见 §9）
 ```
 
 **接口清单（相对 registers 的新增项）**：
@@ -106,7 +114,7 @@ RaiseR1csCircuitWithValuesGenerated(...)        (L415)   本步 R1CS+witness 入
 | 输入地址语义 | `in_mem_addr = reg0`（L230） | fetch_address = reg0，trace_address = NegOne（R1 已分离） | 已存在 |
 | 承诺校验 | `out_hash_this_registers`（L322-328） | `out_hash_this_state`（新，同 gadget） | 模式可复用 |
 | 承诺滚动 | `hashThisRegisters = out_hash_next_registers`（L370） | `hashThisState = out_hash_next_state`（新） | 模式可复用 |
-| 证明入口 | `RaiseR1csCircuitWithValuesGenerated`（L415） | 同一入口 | 已存在 |
+| 证明入口 | `RaiseR1csCircuitWithValuesGenerated`（L415）→ 回调落盘 | 同一入口（R1CS 生成可复用；是否入最终证明待核实） | 接口已存在 / 证明链待核实 |
 
 ## 5. 机制推广判定（逐条标注）
 
@@ -114,8 +122,8 @@ RaiseR1csCircuitWithValuesGenerated(...)        (L415)   本步 R1CS+witness 入
 | --- | --- | --- |
 | ORAM 份额能否像 registers 一样由外层持有、跨 session？ | **INFERRED（强）→ 可行** | `MpcValue` 是纯值对象、无 session 引用；registers 已实证此模式（L73/L297/L376）。ORAM 份额同为 field 元素，无类型障碍。 |
 | 能否作为下一步电路输入？ | **INFERRED（强）→ 可行** | `AddPrivate` 接受任意 `MpcValue`（L297/L302/L549 已用于 registers/memVal/trace）；增 `in_state_j` 线即可。 |
-| 能否把状态转换纳入 collaborative zkSNARK 证明关系？ | **INFERRED → 模式存在** | 每个电路的 R1CS+witness 经 `OnR1csCircuitWithValuesGeneratedAsync` 入协作证明（L415/L23/L45-48）；ORAM 转换电路若按同一 wrapper 构造，其 R1CS 自动进入。**但"转换正确"必须由该电路自身的 R1CS 约束表达，非仅加一个独立承诺**（原报告此点仍成立，见 §6.1）。 |
-| 能否防状态替换/跳步/回滚？ | **INFERRED → 模式存在** | registers 用 hash 承诺链达成（L322-328/L367-371），ORAM 复用同 gadget 需承诺可增量更新且覆盖全状态——覆盖性与成本见 §6.4。 |
+| 能否把状态转换纳入 collaborative zkSNARK 证明关系？ | **收紧：接口可复用（INFERRED）/ 是否入最终证明待核实** | ORAM 转换电路可沿用 R1CS 生成与回调接口（L415/L23/L45-48）；但回调实际只落盘（Program.cs L106-111/L211-214），协作证明是外部 Rust 工具逐电路手动运行，**不能说"自动成为协作证明关系"**。且"转换正确"必须由该电路自身 R1CS 约束表达，非仅加独立承诺（§6.1）。详见 `verifier-chain-check.md`。 |
+| 能否防状态替换/跳步/回滚？ | **收紧：执行器层检查存在（VERIFIED）/ 公开证明层待核实** | 执行器宿主代码有 hash 一致性检查（L322-328/L367-371），为连续绑定提供可复用模式；但**宿主检查 ≠ 恶意 prover 的 verifier 约束**——本仓库未发现 verifier 强制串联跨电路公开 IO、步数连续性或初始/最终锚点（§9）。ORAM 复用同 gadget 还需承诺可增量更新且覆盖全状态（§6.4）。 |
 | 现有框架是否"具备实现路径访问的全部原语"？ | **UNKNOWN（收紧）** | 无专用秘密索引（VERIFIED），但可用比较+乘法组合；是否足够且成本可接受未验证。 |
 
 ## 6. 仍未知 / 需注意的部分（诚实边界）
@@ -125,14 +133,26 @@ RaiseR1csCircuitWithValuesGenerated(...)        (L415)   本步 R1CS+witness 入
 3. **秘密索引与 ORAM 构造（UNKNOWN）**：可用现有原语组合 O(N) 秘密索引，但能否构造出保持 ORAM 复杂度优势、且任意方兼容的转换电路，本轮未验证（负责人第 2 点）。
 4. **承诺覆盖性与增量更新（UNKNOWN）**：需一个覆盖全 ORAM 状态、可每步更新、且更新本身可证的承诺方案；registers 的 hash gadget 是否直接适配大状态未验证。
 5. **参与方模型（UNKNOWN，负责人第 3 点）**：现有 2-3 方 DORAM 与目标冲突是 VERIFIED 论文事实；任意方、dishonest-majority、全体合谋下公开可验证的 ORAM 状态机是否存在，未被证明不可能，也未被证明可行。
+6. **verifier 跨电路检查（VERIFIED 本仓库未发现 / UNKNOWN 外部仓库）**：回调只落盘 R1CS+witness，`SelfVerify()` 是单电路调试自检，协作证明是外部 Rust 工具逐电路手动运行；本仓库内无 verifier 强制串联跨电路公开 IO、步数连续性或初始/最终锚点。外部 `collaborative-zksnark-mod`（codeup.aliyun.com 独立仓库）的验证端逻辑不在固定 commit 证据范围内。详见 `verifier-chain-check.md` 与 §9。
 
 ## 7. 本轮明确不做
 
 - 不实现 Path ORAM、不写 ORAM 电路代码；
 - 不跑 benchmark、不引入新性能对比；
-- 不重新下载全部源码（仅新增 `MpcValue.cs` 一个证据文件）；
+- 不重新下载全部源码（R1 主体仅新增 `MpcValue.cs`；本次 verifier 补充核查按需新增回调方/证明脚本/Rust verifier 等有限证据，见 `verifier-chain-check.md` §6）；
 - 不把"机制可推广"写成"ORAM 已可行"，不把"成本未知"写成"不可能"。
 
 ## 8. 移交决策
 
-见 `decision-revision.md`：整体判定修订为 **HOLD**；NO_GO 严格限定为"直接移植现有 2–3 方 DORAM 且不修改 VDORAM 执行/证明契约"这一 narrower 对象。唯一最关键待验证问题见该文档 §3。
+见 `decision-revision.md`：整体判定修订为 **HOLD**；NO_GO 严格限定为"直接移植现有 2–3 方 DORAM 且不修改 VDORAM 执行/证明契约"这一 narrower 对象。唯一最关键待验证问题见该文档 §3。本次 verifier 补充核查不改变整体判定，但把"承诺链防回滚/自动进入协作证明"收紧为执行器机制层表述（详见 §9）。
+
+## 9. 补充核查：回调链与 verifier 检查（2026-11-23）
+
+研究负责人指出两处措辞过强，本次仅追踪源码、不扩范围，结论见 **`verifier-chain-check.md`**：
+
+| 收紧点 | 原措辞 | 修订后 |
+| --- | --- | --- |
+| 承诺链 | "同时防替换、跳步、回滚" | 执行器具跨步 hash 一致性检查（VERIFIED），提供可复用模式；**恶意 prover 下的公开验证/跳步拒绝/回滚防护需 verifier 检查，本仓库未发现**。 |
+| 证明入口 | "自动成为协作证明关系" | ORAM 转换电路可沿用 R1CS 生成与回调接口；**回调只落盘 R1CS+witness，协作证明由外部 Rust 工具逐电路手动运行**；是否入最终证明及跨电路状态是否被 verifier 强制检查，待核实回调消费端与验证端。 |
+
+与负责人独立核查表逐项对齐：`MpcValue 不依赖 session` 通过；`registers 跨 session 传递` 通过；`ORAM 份额可沿用承载模式` 强推断成立；`ORAM 转换可设计成 R1CS` 尚未构造验证；`执行器具跨步 hash 检查` 通过；`公开 verifier 强制检查跨步 hash 链` **本仓库未发现/待核实**；`ORAM 转换电路进入最终 collaborative SNARK` **待核实回调链**；`任意参与方兼容` 未知。
