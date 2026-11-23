@@ -149,7 +149,9 @@ def e0_total_by_sum(T: int, p: CostParams) -> int:
 def e0_total_closed(T: int, p: CostParams) -> int:
     if T <= 0:
         return 0
-    K = p.c_eq + p.c_sel + 3  # 393 with defaults
+    # P1: LowBit linear coefficient is parameterised (was hardcoded +3).
+    # With defaults lowbit_not+lowbit_and = 1+2 = 3, so K is still 393.
+    K = p.c_eq + p.c_sel + p.lowbit_not + p.lowbit_and
     b = p.lowbit_and           # 2
     return K * T * (T - 1) // 2 - b * (T - 1) + T * p.append_mults
 

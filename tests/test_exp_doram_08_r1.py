@@ -283,5 +283,74 @@ class TestLinearRoundsPreproc(unittest.TestCase):
         self.assertEqual(online_field_elems(m, P), 200)
 
 
+class TestLowBitParameterizationP1(unittest.TestCase):
+    """P1: e0_total_closed must use the same parameterised LowBit coefficient
+    as fetch_e0 / cross_threshold_n. A hardcoded +3 only coincides with the
+    default lowbit_not + lowbit_and = 3, and desynchronises under other params.
+    """
+
+    # Non-default LowBit coefficients: sum = 9 (default sum = 3).
+    # K = c_eq + c_sel + lowbit_not + lowbit_and = 389 + 1 + 4 + 5 = 399
+    # b = lowbit_and = 5
+    P_ND = CostParams(lowbit_not=4, lowbit_and=5)
+
+    def test_non_default_params_are_genuinely_different(self):
+        self.assertNotEqual(self.P_ND.lowbit_not + self.P_ND.lowbit_and,
+                            P.lowbit_not + P.lowbit_and)
+
+    def test_e0_closed_equals_sum_nondefault_lowbit(self):
+        p = self.P_ND
+        for T in (0, 1, 2, 5, 17):
+            self.assertEqual(e0_total_closed(T, p), e0_total_by_sum(T, p),
+                             f"T={T}")
+
+    def test_e0_closed_matches_actual_fetch_e0_nondefault(self):
+        # Compare against the actual per-step cost function, not a copy of the
+        # closed form under test.
+        p = self.P_ND
+        for T in (0, 1, 2, 5, 17):
+            expected = sum(p.fetch_e0(s) + p.append_mults for s in range(T))
+            self.assertEqual(e0_total_closed(T, p), expected, f"T={T}")
+
+    def test_cross_threshold_agrees_with_actual_costs_nondefault_lowbit(self):
+        # The read-only cross bound must predict the sign of the ACTUAL
+        # e1_total_closed - e0_total_closed comparison for both variants.
+        # If e0_total_closed keeps the hardcoded +3 while cross_threshold_n
+        # uses the parameterised K, these disagree for some (T, n).
+        p = self.P_ND
+        mismatches = []
+        for T in (17, 65, 67, 128):
+            e0 = e0_total_closed(T, p)
+            for variant, fn in (("A", e1a_total_closed),
+                                ("B", e1b_total_closed)):
+                thr = cross_threshold_n(T, set(), variant, p)
+                for n in range(1, T + 2):
+                    actual_win = fn(T, n, set(), p) < e0
+                    predicted_win = n < thr
+                    if actual_win != predicted_win:
+                        mismatches.append((T, variant, n, thr))
+        self.assertEqual(mismatches, [],
+                         f"cross/e0 cost disagreement: {mismatches[:5]}")
+
+    def test_cross_threshold_A_readonly_invariant_nondefault_lowbit(self):
+        # E1-A read-only bound is T/2: K cancels between e0 and fetch_a.
+        # Holds only if cross_threshold_n and e0_total_closed share the same K.
+        p = self.P_ND
+        for T in (2, 17, 65, 67, 128):
+            self.assertAlmostEqual(cross_threshold_n(T, set(), "A", p),
+                                   T / 2, places=9)
+
+    def test_default_params_result_unchanged(self):
+        # Default lowbit_not + lowbit_and = 3, so parameterised K == legacy
+        # hardcoded 393; all published default figures remain identical.
+        self.assertEqual(P.lowbit_not + P.lowbit_and, 3)
+        for T in (0, 1, 2, 5, 17, 30, 64, 128):
+            expected = (0 if T <= 0
+                        else 393 * T * (T - 1) // 2 - 2 * (T - 1))
+            self.assertEqual(e0_total_closed(T, P), expected, f"T={T}")
+            self.assertEqual(e0_total_closed(T, P), e0_total_by_sum(T, P),
+                             f"T={T}")
+
+
 if __name__ == "__main__":
     unittest.main()
