@@ -11,6 +11,12 @@ EXP-DORAM-01（含 **R1 修正轮**）：HistoricalKV 双结构替代方案可�
 > 旧 `4–23×` 结论已撤回。R1 统一为每步（step 0 除外）都 Fetch、地址序列一致，重测数据见报告 §6。
 > 旧轮原始数据完整保留，未被覆盖。
 
+## 后续阶段（协议/源码审计）
+
+- **EXP-DORAM-02**（ORAM 状态组件兼容性审计）：8 份文档见 [`docs/exp-doram-02/`](docs/exp-doram-02/)，含论文带页码摘录与 25 个源码证据。
+- **EXP-DORAM-02-R1**（State-Carrying Feasibility Check）：见 [`docs/exp-doram-02-r1/state-carrying-feasibility.md`](docs/exp-doram-02-r1/state-carrying-feasibility.md)。核查确认 registers 份额跨 session 由外层执行器持有、可推广到 ORAM 状态载体机制；**撤回**原"session 注销 → 份额销毁 → 状态无法跨步"推理。
+- **当前决策**（[`decision-revision.md`](docs/exp-doram-02-r1/decision-revision.md)）：整体 **HOLD**；NO_GO 严格限定为"直接移植现有 2-3 方 DORAM 且不改 VDORAM 执行/证明契约"。原 [`decision.md`](docs/exp-doram-02/decision.md) 保留为历史记录。
+
 ## 三实现定位
 
 | 实现 | 做法 | 本轮定位 |
