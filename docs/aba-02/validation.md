@@ -42,4 +42,6 @@ git diff --stat                     -> 空（仅新增未跟踪文档）
 
 ## 5. 提交记录
 
-（提交推送后以 `git rev-parse HEAD` 为准；最终 HEAD = origin/main，工作区干净。）
+- 审计文档提交：`ec1cb3f92eaf370182ea30c817fcd8c55f261738`（`docs(aba-02): audit real VDORAM workloads for bounded address domains`，7 文件、410 insertions）。
+- 最终 commit：以本文件所属文档提交为准；推送后 `git rev-parse HEAD` = `git rev-parse origin/main`，`git status --short --branch` 为 `## main...origin/main`（工作区干净）。
+- 推送过程中出现 1 次 SSL EOF 与多次代理 502；短超时重试第 4 次成功，未用 API 回退、无强推、无额外分支或 PR。
