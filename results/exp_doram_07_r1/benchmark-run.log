@@ -1,0 +1,8 @@
+[ 20/80] n=  16 T=4096 dense_write    export/returns/invariant OK
+[ 40/80] n=  64 T=4096 dense_write    export/returns/invariant OK
+[ 60/80] n= 256 T=4096 dense_write    export/returns/invariant OK
+[ 80/80] n=1024 T=4096 dense_write    export/returns/invariant OK
+
+raw     -> D:\Research\vdoram-historicalkv-experiment\results\exp_doram_07_r1\benchmark_raw.csv (1200 rows)
+summary -> D:\Research\vdoram-historicalkv-experiment\results\exp_doram_07_r1\benchmark_summary.csv (240 groups)
+all export/returns/invariant checks: OK
