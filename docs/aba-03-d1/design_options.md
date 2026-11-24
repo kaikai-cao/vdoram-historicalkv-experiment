@@ -78,28 +78,48 @@ VM 电路与 Fetch 电路各自以自身 witness 计算同一个 `com_i` 并公�
 
 ## 3. 方案 C3：证明组合 / 递归绑定
 
-### 构造
+### 构造与一个必须澄清的边界
 
 把 VM proof 与 Fetch proof 纳入一个共同 statement，由组合电路验证：
 
 ```
 statement_common = (program_hash, n, step_range, event_count, commitment_to_trace)
-地址同一性由组合/递归电路在内部验证两份子 proof 的 witness 关系
 ```
+
+**递归验证能做什么、不能做什么（勘误 C1）**：
+
+- **已验证事实**：普通递归/组合验证可以验证「子 proof 对其**公开输入**成立」。这是递归证明的标准语义。
+- **不能直接推出**：递归电路**不能**读取两个子 proof 的**私有 witness** 并直接比较其中的私有地址。地址在两份子电路中都是私有 witness / 私有输出（`MemoryTraceFetch...cs:42`、`ZkVmExecutor...cs:996/1006`），子 proof 只证明这些私有值满足各自电路约束；递归验证看到的是子 proof 及其公开输入，而非私有 witness。因此「递归电路在内部比较两份 witness 的私有地址」这一说法**不成立**，不能作为已建立的关系。
+
+据此，地址同一性要进入可验证 statement，只有以下两条候选路径（均为设计候选，**不是已实现接口**）：
+
+- **候选路径一：共同承诺。** 两份子 proof 各自在**自己的电路内**约束「本电路的私有地址」与**同一个公开承诺**的关系；顶层组合/递归电路只比较这两份**公开承诺**是否相等。地址始终不进入公开 statement。此时递归电路验证的是「两份公开承诺相等」这一公开关系，而非读取私有 witness。
+- **候选路径二：合并电路。** 把需要比较的地址关系（真实步 `fetch_addr = reg0 = trace_addr`）放进**同一个电路**，使比较在单一约束系统内完成，根本不需要跨 proof 读取私有 witness。代价是失去「两份独立子 proof」的结构。
+
+### 共同承诺路径尚未解决的问题（均非递归本身自动解决）
+
+1. 承诺的 **binding 与 hiding** 性质（见 `leakage_and_security.md` D1）；
+2. 承诺**随机数**的生成、分发与生命周期（含是否需要 MPC 认证随机，见 D6）；
+3. **程序身份、step、执行实例 nonce** 的绑定（防跨步/跨程序/跨实例重放，见 D5）；
+4. **dummy Fetch 与真实访问的类型区分**（`is_mem_op` 门控，见 D7）；
+5. **B4 事件计数、顺序和 halt 边界完整性**（见 D8）；
+6. 递归/组合 proof 的**实际接口及成本**（见下表与 `cost_model.md`）。
+
+递归/组合证明本身**不自动解决**上述任何一项；它只提供「验证子 proof 对公开输入成立」的能力。
 
 ### 同维度评估
 
 | 维度 | 评估 | 标签 |
 | --- | --- | --- |
 | 两份 proof 的共同 statement | 需定义同时约束两份子电路公开输入的顶层 statement；当前每步各自 setup/prove/verify（`plonk.rs:293-315`），无统一 statement | `CONSTRUCTED` + `INFERRED` |
-| 地址同一性由哪个电路验证 | 由递归/组合电路验证子 proof，或把两电路合并为一个大电路；当前无此电路 | `CONSTRUCTED` |
+| 地址同一性如何进入可验证 statement | 递归**不能**直接比较两份子 proof 的私有 witness；两条候选路径：① 各子电路把私有地址绑定到同一**公开承诺**、顶层比较承诺；② 把地址关系放进**同一电路**。二者均未实现 | `CONSTRUCTED`（候选）+ `VERIFIED`（递归不能读私有 witness） |
 | verifier 能否检查完整组合关系 | 理论上可（单一顶层 proof），但需 verifier 持有组合 VK 与顶层公开输入；当前无独立 verifier（ABA-03-C2 §A8） | `UNKNOWN`（接口不存在） |
 | 递归/组合是否需非原生域运算 | PLONK 递归通常涉及跨域模拟（BLS12-377 Fr 与内层域不同）；固定 commit 是否有 pairing/非原生域 gadget 未核验 | `UNKNOWN` |
 | 是否需改造当前 PLONK/MPC prove 数据通路 | 是：当前 `mpc_prove_and_verify_compat_circuit`（`plonk.rs:293-315`）是单电路 setup→prove→verify，无递归/组合分支；`Computation` 枚举无递归项（`client.rs:36-65`） | `VERIFIED`（现有路径无）+ `INFERRED`（需改） |
 | 与 C2 相比是否减少公开数据/重复约束 | 可能把跨电路比较移入证明内，减少 verifier 侧公开值；但引入递归电路自身成本，净收益未测 | `UNKNOWN` |
 | 当前仓库是否有可复用递归/proof-composition 接口 | 在固定 commit 内未发现递归/组合接口（依据 `client.rs:36-65` 枚举、`plonk.rs` 函数集合、`tree.json` 路径检索）；不能因库名或理论可行写成已支持 | `VERIFIED`（未发现）+ `UNKNOWN`（论文层） |
 
-**小结**：C3 理论可行但需要新增递归/组合电路与 prove 通路改造，当前无证据支持可复用；成本和可行性关键项标 `UNKNOWN`，不能据此推荐。
+**小结（勘误 C1）**：C3 **构造尚不完整，关键接口与成本 `UNKNOWN`**。递归验证子 proof 不等于读取私有 witness，因此当前描述**尚未建立私有地址同一性**；必须先选定共同承诺或合并电路路径，并解决上文六项未决问题（binding/hiding、随机性、防重放、dummy 分类、B4 完整性、递归接口成本），才谈得上可实现。当前无证据支持可复用，不能据此推荐。
 
 ---
 
@@ -109,12 +129,12 @@ statement_common = (program_hash, n, step_range, event_count, commitment_to_trac
 | --- | --- | --- | --- |
 | 复用现有 public-input 通道 | 是（通道在，字段需增） | 部分（公开承诺需新增输出） | 否（需新 statement） |
 | 地址机密性 | 无（真实地址明文公开） | 有（承诺隐藏，hiding 待证） | 有（若地址不入公开 statement） |
-| `is_mem_op` 分类 | 公开字段直接分类 | 需公开 `is_mem_op` 或分类承诺 | 递归内验证分类 |
-| step0 / dummy 处理 | 需显式排除/标注 | 承诺字段区分 | 组合内区分 |
-| B4 轨迹完整性 | 不自动闭合 | 不自动闭合 | 理论上可纳入，未证 |
+| `is_mem_op` 分类 | 公开字段直接分类 | 需公开 `is_mem_op` 或分类承诺 | 未定（递归不读私有 witness，分类须进公开承诺或合并电路） |
+| step0 / dummy 处理 | 需显式排除/标注 | 承诺字段区分 | 未定（随所选路径） |
+| B4 轨迹完整性 | 不自动闭合 | 不自动闭合 | 未证（须显式约束，递归本身不提供） |
 | 对现有 VDORAM 侵入 | 低-中 | 中（新增承诺电路） | 高（新增递归/组合 + prove 改造） |
-| 关键未决 | 隐私退化不可接受 | hiding/随机性/防重放待证 | 递归接口/非原生域/成本全 UNKNOWN |
-| 证据等级 | 构造可行 `INFERRED` | 构造可行、安全性质 `UNKNOWN` | 可行性 `UNKNOWN` |
+| 关键未决 | 隐私退化不可接受 | hiding/随机性/防重放待证 | 构造尚不完整；共同承诺六项未决 + 递归接口/非原生域/成本全 UNKNOWN |
+| 证据等级 | 构造可行 `INFERRED` | 构造可行、安全性质 `UNKNOWN` | 构造尚不完整，关键接口与成本 `UNKNOWN`（递归读私有 witness 不成立 = `VERIFIED`） |
 
 ---
 

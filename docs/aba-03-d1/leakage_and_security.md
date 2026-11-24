@@ -65,14 +65,29 @@
 
 **P1-A 的前置作用**：固定完整 opcode table 比较（`../aba-03-c2/verifier_interface_audit.md` §2）能缓解「跨程序替换」，但**不**缓解 C2 承诺重放（承诺内是否含程序身份是独立设计问题）。二者不可互相替代。
 
-### D6. prover 选择性中止 / 重试 / 重新初始化
+### D6. prover 选择性中止 / 重试 / 重新初始化（勘误 C1：威胁模型前提）
+
+**三层证据区分**（不得混同；尤其不得把条件性推论写成已执行攻击）：
+
+- **VERIFIED（源码事实）**：
+  - 固定上游 `plonk.rs:293-315` 的兼容电路路径在**同一函数内**执行 setup → prove → verify；
+  - `test_rng()` 用于该路径的 setup（`plonk.rs:302-304`），即 **VK 在该路径中现场生成**；
+  - 当前固定源码**没有展示**独立 verifier 持有预先固定 VK 的完整接口（见 `../aba-03-c2/verifier_interface_audit.md` §A5-A8）。
+- **UNKNOWN（外部部署条件，未纳入本审计范围）**：
+  - 外部部署是否存在 VK 固定、可信分发或独立 verifier 机制——当前固定源码未展示，不等于外部不存在；
+  - 外部 verifier 是否**接受 prover 自行提供的 VK**——无证据。
+- **CONDITIONAL INFERENCE（带前提的推论，非攻击结果）**：
+  - **只有**在「外部 verifier 接受 prover 自行提供的 VK」**且**「没有其他可信锚定机制」两个前提下，prover 才可能通过重新 setup 尝试不同 VK / 证明实例。
+  - 该推论**不是**已执行攻击，也不是源码已证明的结论；前提任一不成立即不适用。
 
 | 方案 | 结论 | 标签 |
 | --- | --- | --- |
-| 通用 | 当前 vk 由 prover 进程 `test_rng()` 现场生成（`plonk.rs:302-304`），prover 可重新 setup 换 vk；无独立 verifier 固定 vk → prover 可反复重试直到得到有利 proof/公开值。这是**所有方案共有的前置缺口**，不因 C1/C2/C3 选择而消失 | `VERIFIED`（现场 vk）+ `INFERRED`（重试能力） |
-| C1 | 公开地址由 prover 生成；配合现场 vk，prover 可重试 | `INFERRED` |
-| C2 | 若 `r_i` 由 prover 选，可重采样承诺重试；若 `r_i` 由 verifier/MPC 固定则缓解 | `INFERRED` + `UNKNOWN`（机制未定） |
-| C3 | 递归 setup 同样可能现场生成；未核验 | `UNKNOWN` |
+| 通用 | 源码事实：setup/prove/verify 同函数、VK 现场生成（`plonk.rs:293-315`、`test_rng()` 见 `:302-304`）、当前固定源码无独立 verifier 固定 VK 接口。**重试能力是条件性推论**：仅当外部 verifier 接受 prover 自提 VK 且无其他可信锚定时，才可能通过重 setup 换 VK；外部行为 `UNKNOWN` | `VERIFIED`（源码事实）+ `UNKNOWN`（外部部署）+ `CONDITIONAL INFERENCE`（重试，非攻击结果） |
+| C1 | 公开地址由 prover 生成；在上述条件前提下，配合现场 VK 的允许才可能重试。条件不成立则不适用 | `CONDITIONAL INFERENCE` |
+| C2 | 若 `r_i` 由 prover 选，条件性地可重采样承诺；若 `r_i` 由 verifier/MPC 固定则缓解（`r_i` 机制未定） | `INFERRED` + `UNKNOWN`（机制未定） |
+| C3 | 递归 setup 是否现场生成未核验；重试前提同样未定 | `UNKNOWN` |
+
+**不得据此声称**：不存在「prover 可反复 setup 直到得到有利 proof」的已验证结论；该能力既未被本轮执行，也未被固定源码直接证明，仅在明确威胁模型前提下成立。
 
 ### D7. dummy Fetch 与真实访问混淆
 
@@ -96,7 +111,7 @@
 
 ## 2. 横切结论
 
-1. **所有方案共享两个前置缺口**：独立 verifier + 固定 vk（否则 prover 可重试/重 setup）、P1-A 固定程序表（否则可跨程序替换）。这两个缺口不因 P2 方案选择而闭合。
+1. **所有方案共享的前置需求（勘误 C1）**：独立 verifier + 固定/可信分发的 VK、P1-A 固定程序表。源码事实是当前兼容路径现场生成 VK 且未展示独立 verifier 固定 VK 接口（`VERIFIED`）；至于「缺乏固定 VK 是否使 prover 可重 setup 重试」，是**以外部 verifier 接受 prover 自提 VK 且无其他可信锚定为前提的条件性推论**（`CONDITIONAL INFERENCE`；外部部署 `UNKNOWN`），不是已验证攻击。这些需求不因 P2 方案选择而闭合。
 2. **地址机密性与可验证性存在张力**：C1 用隐私换简单可验证；C2/C3 保隐私但引入承诺/递归的隐藏性质与随机性生命周期问题，关键项 `UNKNOWN`。
 3. **B4 轨迹完整性在所有方案中都不是自动获得的**：必须显式设计事件计数、顺序、halt 边界约束；本文仅为候选，未实现。
 4. **不得把宿主哈希检查或逐行哈希当作隐藏承诺或 verifier 绑定**：`out_hash_mem_trace`（含 step/随机 enc_key，`:1009-1017`）与宿主多重集比对（`:551-583`）都不满足稳定承诺/公开可验证约束的要求（`VERIFIED` 区分依据）。
