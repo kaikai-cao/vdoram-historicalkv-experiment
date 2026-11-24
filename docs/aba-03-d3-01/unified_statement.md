@@ -41,6 +41,8 @@ OP_exp        verifier 固定的预期完整 opcode table
 OP_pub        proof public inputs 中的 opcode table
 prog_ref      program 身份锚点（P1-A-1 下可由 OP_exp 承担；digest 为可选 P1-A-2）
 exec_id       执行实例唯一标识（当前无机制）
+T             执行总步数，含 step 0
+M             真实 Load/Store 事件数（= real Fetch 数）
 step_i        第 i 个 VM 步（step 0 为例外）
 is_mem_op_i   由 opcode 在电路内派生的事件类型
 addr_i        承诺覆盖的地址；真实步为 reg0，dummy 步为 p−1
@@ -90,7 +92,14 @@ R-Commitment (若选共享隐藏承诺路径):
     两侧各自正确约束 opening；Pedersen 同 C + 同消息 ⇒ r_vm = r_fetch mod q
 
 R-Completeness (B4, 未闭合):
-    count(events) == T − 1 − M
+    N_all   = T − 1                 # 总 Fetch 事件数（step0 无 Fetch）
+    N_real  = M                     # 真实 Fetch 数
+    N_dummy = T − 1 − M             # dummy Fetch 数（不是总数）
+    N_all   = N_real + N_dummy
+    Events  = [event_i | i = 1..T−1]
+    count(Events)        == N_all
+    count(real_events)   == N_real
+    count(dummy_events)  == N_dummy
     events 按 step 单调、无重复、无遗漏、无重排
     execution 在预期 halt/异常边界终止
 ```
@@ -132,7 +141,7 @@ R-Completeness (B4, 未闭合):
 3. **哪些字段必须保持私有？** `reg0`/真实地址、`r_i`、选中 opcode 行/PC（除非显式选择 C1 公开化）、MPC share。`is_mem_op` 当前为私有派生输出；若 verifier 需分类，必须新增“由 opcode 派生且绑定到公开 statement/承诺”的路径，而不是让 prover 直接声明。
 4. **VM、Fetch、Trace、Commitment 如何对应？** 真实步应形成 `reg0 → (fetch_lookup_addr, trace_addr) → 同一 com_i → 同一 step/event` 的闭合关系；dummy 步只能承诺 `p−1` 与类型，lookup 仍为 `reg0` 且不得公开；step↔trace_row 映射与 B4 顺序/完整性尚需新增约束（`p2_binding_semantics.md` B1–B4；`circuit_interface.md` §2/§3）。
 5. **dummy 如何不泄露 reg0？** 承诺 event_type=dummy 与 `addr=p−1`（或显式不承诺地址），绝不承诺 dummy lookup 的 `reg0`；实际 trace row 只绑定哨兵 `p−1`（`context_and_replay.md` §2.2；`circuit_interface.md` §2.2）。
-6. **step 0 如何进入事件序列？** step 0 有 trace 行但无 Fetch、无承诺事件；event count 为 `T−1−M`，step0 必须显式排除，不得虚构 Fetch proof（`p2_binding_semantics.md` B3；`context_and_replay.md` §2.3）。
+6. **step 0 如何进入事件序列？** step 0 有 trace 行但无 Fetch、无承诺事件，不计入 Fetch 事件序列；总 Fetch 数 `N_all = T−1`，其中真实 `N_real = M`、dummy `N_dummy = T−1−M`，且 `N_all = N_real + N_dummy`（`T−1−M` 是 dummy 数，**不是**总数）。step0 必须显式排除，不得虚构 Fetch proof（`p2_binding_semantics.md` B3；`context_and_replay.md` §2.3）。上述计数为 `CONSTRUCTED` 候选关系，非上游已实现约束。
 
 ---
 

@@ -20,7 +20,10 @@ B4 不是“比较两份承诺”或“event count 正确”就能推出的性�
 
 | 编号 | 必要条件 | 候选表达（非现有实现） | 证据 / 标签 | 说明 |
 | --- | --- | --- | --- | --- |
-| E1 | 事件总数与执行步数关系 | `event_count = T − 1 − M`，其中 `T` 含 step0，`M` 为真实 Load/Store 数 | `T−1−M` 由 `p2_binding_semantics.md` B2 推导：`INFERRED`；约束为 `CONSTRUCTED` | step0 无 Fetch；每个 step≥1 构造一次 Fetch（`ZkProgramExecutor.cs:201-228`） |
+| E1a | 总 Fetch 事件数 | `N_all = T − 1`，其中 `T` 含 step0 | step0 无 Fetch `VERIFIED`（`:201-203`）；每 step≥1 构造一次 Fetch `VERIFIED`（`:205-228`）；计数关系为 `CONSTRUCTED` | `N_all` 是**总** Fetch 数，不是 dummy 数 |
+| E1b | 真实 Fetch 事件数 | `N_real = M`，`M` 为真实 Load/Store 数 | 类型由 opcode 派生 `VERIFIED`（`ZkVmExecutor...cs:968-976`）；计数关系为 `CONSTRUCTED` | real Fetch 与真实 Load/Store 一一对应 |
+| E1c | Dummy Fetch 事件数 | `N_dummy = T − 1 − M` | 由 E1a/E1b 与 `p2_binding_semantics.md` B2 推导：`INFERRED`；约束为 `CONSTRUCTED` | `T−1−M` 是 **dummy** 数，**不是**总数 |
+| E1d | 三类计数加和一致 | `N_all = N_real + N_dummy` | 代数恒等式 `INFERRED`；写成电路约束为 `CONSTRUCTED` | 无遗漏/无重复还须由 E9 独立证明，加和本身不证明完整性 |
 | E2 | step 0 例外显式化 | step0 只有 trace row，无 Fetch proof、无承诺事件，event_count 不含 step0 | `VERIFIED_SOURCE`（无 Fetch `:201-203`、仍 append `:389-402`）+ `CONSTRUCTED`（事件序列排除） | 不得因 trace 行数增加而把 step0 计为真实事件 |
 | E3 | 每个 step≥1 的 Fetch 恰好对应一个执行步 | 对每个 `i≥1`，存在一个且仅一个 Fetch statement，其 `step_fetch = step_i` | 每步构造 Fetch 为 `VERIFIED`（`:205-228`）；proof/statement 绑定为 `CONSTRUCTED` | 源码事实不等于 proof 中“恰好一次”已被证明 |
 | E4 | real/dummy 类型由 opcode 在电路内派生 | `is_mem_op_i == (opcode_i ∈ {Load, Store})`，event_type 由该值绑定进公开 statement 或公开承诺 | 派生路径 `VERIFIED`（`ZkVmExecutor...cs:968-976`）；Prove 忽略 `is_mem_op` 为 `VERIFIED`（原始 L164-165）；公开绑定 `CONSTRUCTED` | 不能让 prover 自由声明 event_type |
@@ -49,7 +52,13 @@ B4 不是“比较两份承诺”或“event count 正确”就能推出的性�
 Events = [event_i | i = 1..T−1]                 # step 0 排除
 event_i = (step_i, is_mem_op_i, addr_i, row_ref_i, proof_i)
 
-constrain count(Events) == T − 1 − M
+constrain N_all   = T − 1                         # 总 Fetch 数（step0 排除）
+constrain N_real  = M                             # 真实 Fetch 数
+constrain N_dummy = T − 1 − M                     # dummy Fetch 数（不是总数）
+constrain N_all   = N_real + N_dummy
+constrain count(Events)        == N_all
+constrain count(real_events)   == N_real
+constrain count(dummy_events)  == N_dummy
 constrain step_i 单调且与执行步对应               # 需新增
 constrain event_i.row_ref_i ↔ row_i              # 需新增 step↔trace row 映射
 constrain is_mem_op_i 由 opcode_i 电路派生        # 电路派生已 VERIFIED；公开绑定 CONSTRUCTED
@@ -58,7 +67,7 @@ constrain dummy: fetch_lookup == reg0, trace_addr == p−1, 不承诺 reg0
 constrain halt:  最后 step 或异常中止边界由 verifier 固定
 ```
 
-其中 `T−1−M` 与三类事件语义来自既有证据；`count/order/completeness/halt` 四类约束均为 `CONSTRUCTED`，当前无实现证据。
+其中 `N_all = T−1`、`N_real = M`、`N_dummy = T−1−M`（`T−1−M` 是 dummy 数，**不是**总数）及三类事件语义来自既有证据；`count/order/completeness/halt` 四类约束均为 `CONSTRUCTED`，当前无实现证据。加和式 `N_all = N_real + N_dummy` 是代数恒等式，不能替代 E9 的无遗漏/无重复证明。
 
 ---
 
