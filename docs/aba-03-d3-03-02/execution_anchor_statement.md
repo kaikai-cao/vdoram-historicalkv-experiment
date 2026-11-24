@@ -7,6 +7,8 @@
 > 标签：`VERIFIED` / `CONSTRUCTED`（本轮候选字段与约束） / `INFERRED` / `UNKNOWN` / `BLOCKED`。
 >
 > 证据来源：`trust_boundary_inventory.md`；`../aba-03-d2/context_and_replay.md`；`../aba-03-d3-01/verifier_independence.md`；`../aba-03/source_trace_audit.md`。
+>
+> 术语勘误（本轮唯一变更）：执行步数采用冻结语义——`total_steps = T` 是 VM 总执行步数（含 step 0）；`last_step_index = T-1` 是最后一个实际执行的 step index；Fetch 事件索引范围为 `[1,T-1]`，事件总数为 `T-1`；step 0 有 VM 执行与 trace row，但无 Fetch proof、无 Fetch commitment event。本文不再使用旧的语义不明确末步字段。本轮仅修术语，不等于已实现 counter 或取得 verifier 可信 T。
 
 ---
 
@@ -31,11 +33,14 @@ ExecutionAnchor = {
     initial_state_commitment,
     execution_id,
     expected_step_bound,
-    final_step,
+    total_steps,          # T，含 step 0；主字段
+    last_step_index,      # T-1；由 total_steps 派生，非独立 prover 输入
     final_state_commitment,
     vk_id
 }
 ```
+
+其中 `total_steps` 与 `last_step_index` 不是两个独立真值：后者必须满足 `last_step_index = total_steps - 1`，且只用于表达 Fetch 事件域 `[1,T-1]`。
 
 逐字段表：
 
@@ -47,8 +52,9 @@ ExecutionAnchor = {
 | `public_input_commitment` | 可选（若 public input 直接公开比对则可省） | prover / 电路 | verifier 需期望值或核对明文 | 电路内 input→commitment 绑定 | 可隐藏输入；但公开输入本已可见（n 等），压缩收益小 | `CONSTRUCTED` |
 | `initial_state_commitment` | 可选但有用（绑定初始 pc/reg） | prover / 电路 | verifier 需可信初始值或承诺 | VM 电路初值约束 | 隐藏初始寄存器（多为固定零），收益小 | `CONSTRUCTED` |
 | `execution_id` | 必要（防跨执行拼接，见 Q2/Q6） | **必须**由 verifier 或可信调用方生成（非 prover） | verifier 固定本次请求唯一 id | 进入所有相关 proof 的 statement / 承诺 context | 公开 id 通常可接受；若含随机需防链接 | `CONSTRUCTED`；当前无实体（`VERIFIED` 缺失） |
-| `expected_step_bound` | 与 `final_step` 分工（见 Q3） | verifier / 程序规范固定上界 | verifier 固定 | 电路步数上限检查（当前 `GlobalStepsNoMoreThan` 是 host 阈值，非电路约束） | 公开上界通常可接受 | `CONSTRUCTED`；当前仅 host 阈值（`VERIFIED`） |
-| `final_step` | 必要（T 的证明层表示，见 Q3/Q4） | **必须**由电路 counter 状态产生并受约束 | verifier 需可信 T 或受约束推导 | 电路内 counter 递增 + halt↔末项绑定 + 进 statement | 公开 T 泄露执行步数（程序相关，通常可接受） | `CONSTRUCTED`；当前 T 是 host 记录、不进 statement（`VERIFIED` 缺失） |
+| `expected_step_bound` | 与 `total_steps` / `last_step_index` 分工（见 Q3）；**只是上界，不等于实际 `total_steps`** | verifier / 程序规范固定上界 | verifier 固定 | 电路步数上限检查：约束 `total_steps ≤ bound`（当前 `GlobalStepsNoMoreThan` 是 host 阈值，非电路约束） | 公开上界通常可接受 | `CONSTRUCTED`；当前仅 host 阈值（`VERIFIED`） |
+| `total_steps` | 必要（实际总步数 `T` 的证明层表示，含 step 0；见 Q3/Q4） | **必须**来自受约束 counter 或 verifier 可信来源，不能来自 prover 自报 | verifier 固定可信 `T`，或核对受约束 counter 输出 | 电路内 counter 递增 + halt↔`last_step_index` 绑定 + `total_steps` 进 statement | 公开 `T` 泄露执行步数（程序相关，通常可接受） | `CONSTRUCTED`；当前 `T` 是 host 记录、不进 statement（`VERIFIED` 缺失） |
+| `last_step_index` | 派生字段：`last_step_index = total_steps - 1`，表示最后一个实际执行的 step index；用于 Fetch 域 `[1,T-1]` | 由同一受约束 counter 派生，**不是**独立 prover 输入 | verifier 核对 `last_step_index + 1 = total_steps` | 电路内等式约束；若显式进 statement 必须与 `total_steps` 同时受约束 | 与 `total_steps` 等价泄露，不增加隐私面 | `CONSTRUCTED`；当前未实现（`VERIFIED` 缺失） |
 | `final_state_commitment` | 可选但有用（绑定最终 pc/reg/output） | prover / 电路 | verifier 需可信预期输出 | 电路内终态→commitment 绑定 | 可隐藏最终寄存器；public output 已部分公开 | `CONSTRUCTED` |
 | `vk_id` | 必要（绑定 VK↔program/circuit，见 Phase 3） | 可信分发/注册 | verifier 固定 VK 及其 id | 不进电路；是 verify 的配置输入 | 无（公开标识） | `CONSTRUCTED`；当前现场 `test_rng()`（`VERIFIED` 缺失） |
 
@@ -64,29 +70,30 @@ ExecutionAnchor = {
 
 ### Q2. `execution_id` 应绑定哪些字段，才能避免跨执行拼接？
 
-- 应绑定：`program_id`（或承诺）、`public_input_commitment`（或明文输入摘要）、`initial_state_commitment`、`expected_step_bound`/`final_step`、`vk_id`，并绑定到 proof transcript（`CONSTRUCTED`）。
+- 应绑定：`program_id`（或承诺）、`public_input_commitment`（或明文输入摘要）、`initial_state_commitment`、`expected_step_bound`/`total_steps`（若显式列出 `last_step_index`，须同时绑定 `last_step_index = total_steps - 1`）、`vk_id`，并绑定到 proof transcript（`CONSTRUCTED`）。
 - **关键约束**：`execution_id` 必须由 **verifier 或可信调用方**在本请求开始时生成并固定，写入所有相关 proof 的 statement（`verifier_independence.md` §1；`context_and_replay.md` §1 execution_id 行）。**不能**由 prover 生成——prover 生成的 id 只是又一个自我声明字段。
 - 当前 `enc_key = Random()`（每执行一值）不满足：它是 prover 侧私有 witness、未被 verifier 持有、未绑定上述字段（`VERIFIED` 缺失 + `UNKNOWN`）。
 - 若 `execution_id` 仅进部分 proof 而非全部，跨 proof 拼接仍有缝（见 `proof_composition_binding.md`）。
 
-### Q3. `expected_step_bound` 与 `final_step` 是否必须同时存在？
+### Q3. `expected_step_bound` 与 `total_steps` / `last_step_index` 是否必须同时存在？
 
-- **功能不同**：`expected_step_bound` 是程序规范给出的**上界/预期**（如 `GlobalStepsNoMoreThan`，可公开固定），用于拒绝超长执行；`final_step` 是本次执行的**实际末步 T**，用于确定完整 step 域 `[1,T−1]`（R8）。
-- 上界不能替代实际 T：`count(events)=T−1` 需要真实 T 才成立，`expected_step_bound` 只是 `T ≤ bound` 的约束，无法排除 prover 声明较小 T 的前缀截断。
-- **结论（`INFERRED`）**：R8 的最小可信表示需要 `final_step` 来自受约束 counter；`expected_step_bound` 是**额外的上界防护**，二者不互相替代。是否两者都进 statement 取决于是否需要"拒绝超长"这一独立策略；本轮不强制，但明确不能用上界充当 T。
+- **术语冻结**：`total_steps = T` 是 VM 实际总执行步数，**包含 step 0**；`last_step_index = T-1` 是最后一个实际执行的 step index。二者不是同一个量：`total_steps` 回答"一共执行了多少步"，`last_step_index` 回答"最后一步的 index 是多少"，且恒有 `last_step_index = total_steps - 1`。Fetch 事件索引范围为 `[1,T-1]`，总数为 `T-1`；step 0 有 VM 执行与 trace row，但无 Fetch proof、无 Fetch commitment event。
+- **功能不同**：`expected_step_bound` 是程序规范给出的**上界/预期**（如 `GlobalStepsNoMoreThan`，可公开固定），用于拒绝超长执行；`total_steps` 是本次执行的实际总步数 `T`，`last_step_index = T-1` 用于确定完整 Fetch step 域 `[1,T-1]`（R8）。
+- 上界不能替代实际 T：`count(events)=T-1` 需要真实 T 才成立，`expected_step_bound` 只是 `total_steps ≤ bound` 的约束，**不等于实际 `total_steps`**，无法排除 prover 声明较小 T 的前缀截断。
+- **结论（`INFERRED`）**：R8 的最小可信表示需要 `total_steps` 来自受约束 counter 或 verifier 可信来源；若 statement 显式包含 `last_step_index`，必须与 `total_steps` 受同一 counter 约束为 `last_step_index = total_steps - 1`，不得作为独立 prover 输入。`expected_step_bound` 是**额外的上界防护**，不能充当 T。是否两者都进 statement 取决于是否需要"拒绝超长"这一独立策略；本轮不强制，也不声称 counter 或可信 T 已实现。
 
-### Q4. `final_step` 如何证明来自真实 halt，而不是 prover 自报？
+### Q4. `total_steps` 如何证明来自真实 halt，而不是 prover 自报？
 
-- **当前做不到**（`VERIFIED` 缺失）：`out_halt` 是 VM 电路 public output（`ZkVmExecutor...cs:902-906`），但 `break` 由 host C# 控制（`ZkProgramExecutor.cs` 快照 L419-421），最终 T 由 host 记录（快照 L601），T 不进 statement，且无电路内 counter 递增约束。
-- **候选约束（`CONSTRUCTED`）**：① 电路内 step counter 从初值逐步递增（R5-A）；② halt 状态与事件序列末项在同一电路/同一关系内绑定，使"末个事件 step = halt 时 counter"；③ `final_step` 作为该 counter 的 public output 进 statement，由 verifier 核对或可信取得。
-- **仍需**：verifier 对 `final_step` 的可信预期或受约束推导（R8-A/B）。若 verifier 只接受 prover 报的 `final_step`，问题回到原点。
+- **当前做不到**（`VERIFIED` 缺失）：`out_halt` 是 VM 电路 public output（`ZkVmExecutor...cs:902-906`），但 `break` 由 host C# 控制（`ZkProgramExecutor.cs` 快照 L419-421），最终 `total_steps`（T）由 host 记录（快照 L601），T 不进 statement，且无电路内 counter 递增约束。
+- **候选约束（`CONSTRUCTED`）**：① 电路内 step counter 从初值逐步递增（R5-A）；② halt 状态与事件序列末项在同一电路/同一关系内绑定，使"末个 Fetch 事件 step = halt 时的 `last_step_index`"与同一个受约束 counter 一致；③ `total_steps` 作为该 counter 的 public output 进 statement，由 verifier 核对或可信取得；若显式列出 `last_step_index`，必须由同一 counter 约束 `last_step_index = total_steps - 1`，不能独立自报。
+- **仍需**：verifier 对 `total_steps` 的可信预期或受约束推导（R8-A/B）。若 verifier 只接受 prover 报的 `total_steps`（或独立自报的 `last_step_index`），问题回到原点。
 - 该候选依赖 R5/R8 电路改造（当前 `BLOCKED_BY_CURRENT_INTERFACE`，`../aba-03-d3-03-01/decision.md`）。
 
 ### Q5. 是否需要绑定 initial/final state？
 
 - **非严格必需但强烈有益（`INFERRED`）**：不绑定初态，则 prover 可从任意初始 pc/reg 开始执行（只要满足 opcode 表与 step 约束），"程序从预期入口开始"无法证明；不绑定终态，则"执行结果正确"无法证明。
 - 当前初态 pc/reg 是私有输入、逐步哈希链只在执行内部自洽（`source_trace_audit.md` A1）；终态 public output 已部分公开但无 verifier 预期值。
-- **结论**：最小 anchor 可先用 `program_id` + 公开输入 + `execution_id` + `final_step` + `vk_id` 闭合"是哪次执行、什么程序、跑到哪、用什么 VK"；`initial/final_state_commitment` 属于"执行结果正确性"的额外声明，视应用需求加入，加入即引入承诺信任面。
+- **结论**：最小 anchor 可先用 `program_id` + 公开输入 + `execution_id` + `total_steps`（以及受约束派生的 `last_step_index`，若显式列出）+ `vk_id` 闭合"是哪次执行、什么程序、总共执行多少步/最后 step index、用什么 VK"；`initial/final_state_commitment` 属于"执行结果正确性"的额外声明，视应用需求加入，加入即引入承诺信任面。
 
 ### Q6. memory trace commitment 应属于 execution anchor，还是独立 proof 输出后再绑定？
 
@@ -98,7 +105,7 @@ ExecutionAnchor = {
 
 ### Q7. 哪些字段可以公开，哪些应保持隐藏承诺？
 
-- **可公开且通常无隐私代价**：`protocol_version`、`program_id`（或 `vk_id`、`execution_id`、`expected_step_bound`、`final_step`（执行步数通常程序相关可接受）。
+- **可公开且通常无隐私代价**：`protocol_version`、`program_id`、`vk_id`、`execution_id`、`expected_step_bound`、`total_steps`（以及派生的 `last_step_index`）；执行步数通常程序相关，可接受。
 - **需权衡**：`public_input`（当前 n 已是 public input，`ZkProgramExecutor.cs` 快照 L265/L268/L283）；`initial/final_state`（多为固定值或 public output）。
 - **应保持隐藏**：真实地址 `reg0`、dummy 的 `reg0`（冻结语义：**dummy 只承诺 `p−1`，不承诺/不公开 `reg0`**，`../aba-03-d2/context_and_replay.md` §2.2）、`enc_key`（承诺随机盐）。
 - **关键边界（`INFERRED`）**：把字段做成"隐藏承诺"不自动提升可信度——承诺的 binding/hiding/opening 未闭合（`../aba-03-d2/decision.md`），隐藏承诺 vs 公开字段的取舍是**隐私 vs 信任面大小**的权衡，不是"隐藏即安全"。
@@ -109,7 +116,7 @@ ExecutionAnchor = {
 
 | 集合 | 字段 | 能回答的问题 | 不能回答 |
 | --- | --- | --- | --- |
-| **最小可信 anchor**（`CONSTRUCTED`） | `protocol_version`, `program_id`（verifier 派生）, `execution_id`（verifier 生成）, `public_input`（明文）, `final_step`, `vk_id` | 哪个程序、哪次执行、什么公开输入、跑到哪、用什么 VK | 初/终态正确性、地址隐私下的承诺绑定、完整事件序列（B4） |
+| **最小可信 anchor**（`CONSTRUCTED`） | `protocol_version`, `program_id`（verifier 派生）, `execution_id`（verifier 生成）, `public_input`（明文）, `total_steps`（若列 `last_step_index`，须约束为 `total_steps - 1`）, `vk_id` | 哪个程序、哪次执行、什么公开输入、总共执行多少步/最后 step index、用什么 VK | 初/终态正确性、地址隐私下的承诺绑定、完整事件序列（B4） |
 | **完整 anchor**（含承诺） | 再加 `program_commitment`, `public_input_commitment`, `initial/final_state_commitment`, `memory_trace_commitment` | 覆盖初终态与隐藏承诺 | 仍不自动闭合 B4；且引入未决承诺信任面 |
 
 **结论（`INFERRED`）**：最小 anchor 在 verifier 侧字段全部可信的前提下可回答本轮六问中的"程序/执行/终止/VK"四问，但 (a) 这些字段当前**无一**具备 verifier 可信来源，(b) 完整 anchor 的承诺层未决。因此最小 anchor 也只是**候选设计**，不构成当前可实现接口。
@@ -118,6 +125,6 @@ ExecutionAnchor = {
 
 ## 4. 本阶段结论
 
-- `ExecutionAnchor` 可写成一个字段完备的候选 statement（`CONSTRUCTED`），但**字段完备 ≠ 可信**：十个字段中，当前固定 commit 能为 verifier 提供独立可信来源的为**零**（`protocol_version` 是协议常量除外，但它本身不承载身份）。
-- 三个最关键字段——`execution_id`、`final_step`、`vk_id`——的当前状态分别是：不存在（无 execution_id）、host 记录且不进 statement（final_step）、现场 `test_rng()` 生成（vk_id）（均 `VERIFIED` 缺失）。
-- 因此本轮结论不是"设计一个 anchor 结构体"，而是：**要让 anchor 可信，必须新增 verifier 侧可信来源（固定 VK、verifier 生成的 execution_id、电路 counter 产生的 final_step、固定 program_id）——这些都属于改变信任模型/新增信任根，而非复用现有接口。** 详见 `verifier_vk_trust_model.md` 与 `decision.md`。
+- `ExecutionAnchor` 可写成一个字段完备的候选 statement（`CONSTRUCTED`），但**字段完备 ≠ 可信**：候选字段（含派生的 `last_step_index`）中，当前固定 commit 能为 verifier 提供独立可信来源的为**零**（`protocol_version` 是协议常量除外，但它本身不承载身份）。
+- 三个最关键字段——`execution_id`、`total_steps`（及派生 `last_step_index`）、`vk_id`——的当前状态分别是：不存在（无 execution_id）、host 记录且不进 statement（`total_steps`）、现场 `test_rng()` 生成（vk_id）（均 `VERIFIED` 缺失）。
+- 因此本轮结论不是"设计一个 anchor 结构体"，而是：**要让 anchor 可信，必须新增 verifier 侧可信来源（固定 VK、verifier 生成的 execution_id、受约束 counter 或 verifier 可信来源产生的 `total_steps`、固定 program_id）——这些都属于改变信任模型/新增信任根，而非复用现有接口。** 本轮术语修正不代表 counter 或可信 T 已实现。详见 `verifier_vk_trust_model.md` 与 `decision.md`。

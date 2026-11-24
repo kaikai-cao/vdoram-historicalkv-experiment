@@ -12,7 +12,7 @@
 
 ## 1. 阶段结论：`BLOCKED_BY_TRUST_MODEL`
 
-**核心判断（`VERIFIED` + `INFERRED`）**：当前固定 commit 中**不存在** verifier-trusted execution anchor。program identity、execution identity、public input provenance、可信 T、VK identity、跨 proof binding 六项能力中，没有一项具备"verifier 固定或可信取得"的来源。当前所谓验证是 prover 进程内用现场 `test_rng()` 生成的 VK、prover 自己 JSON 的 public inputs 检查 prover 自己的 proof 自洽（`plonk.rs:293-315`），固定快照全目录检索无 `execution_id`/`program_id`/`program_hash`（`trust_boundary_inventory.md` §1/§2），最终 T 只是 host 记录且不进 statement（快照 L601）。
+**核心判断（`VERIFIED` + `INFERRED`）**：当前固定 commit 中**不存在** verifier-trusted execution anchor。program identity、execution identity、public input provenance、可信 T、VK identity、跨 proof binding 六项能力中，没有一项具备"verifier 固定或可信取得"的来源。当前所谓验证是 prover 进程内用现场 `test_rng()` 生成的 VK、prover 自己 JSON 的 public inputs 检查 prover 自己的 proof 自洽（`plonk.rs:293-315`），固定快照全目录检索无 `execution_id`/`program_id`/`program_hash`（`trust_boundary_inventory.md` §1/§2），最终 `total_steps`（T）只是 host 记录且不进 statement（快照 L601）；按冻结语义 T 含 step 0，末 step index 为 `last_step_index = T-1`。
 
 **按本轮关键判据**："若可信来源最终仍然是 prover 自己，结论就应该是阻断，而不是接口可行。" —— 当前六项字段的可信来源**全部是 prover/host 自己**，故阶段结论为 `BLOCKED_BY_TRUST_MODEL`。
 
@@ -29,11 +29,11 @@
 ## 2. 六个必答题逐项回答
 
 1. **当前架构是否已有 verifier-trusted execution anchor？** —— **否**（`VERIFIED`）。无独立 verifier、无固定 VK、无 execution_id/program_id、T 不进 statement、无跨 proof 公开绑定。
-2. **最小 anchor statement 包含哪些不可缺少的字段？** —— `protocol_version`、`program_id`（verifier 派生）、`execution_id`（verifier 生成）、公开输入（或承诺）、`final_step`、`vk_id`（`execution_anchor_statement.md` §3）。`initial/final_state_commitment`、`program_commitment` 属可选、引入承诺信任面，非必需。
-3. **T 应由谁固定或可信取得？** —— 由 verifier 固定预期 T，或由电路内 step counter 受约束产生并由 verifier 核对（`final_step` 进 statement）。不能是 prover 自报，也不能只用 `expected_step_bound` 上界替代（`execution_anchor_statement.md` Q3/Q4）。
+2. **最小 anchor statement 包含哪些不可缺少的字段？** —— `protocol_version`、`program_id`（verifier 派生）、`execution_id`（verifier 生成）、公开输入（或承诺）、`total_steps`（若显式列出 `last_step_index`，须约束为 `total_steps - 1`）、`vk_id`（`execution_anchor_statement.md` §3）。`initial/final_state_commitment`、`program_commitment` 属可选、引入承诺信任面，非必需。
+3. **T 应由谁固定或可信取得？** —— 由 verifier 固定预期 `total_steps = T`（含 step 0），或由电路内 step counter 受约束产生并由 verifier 核对（`total_steps` 进 statement）；`last_step_index = T-1` 必须由同一 counter 派生，Fetch 事件域为 `[1,T-1]`、共 `T-1` 个，step 0 无 Fetch proof / 无 Fetch commitment event。`total_steps` 必须来自受约束 counter 或 verifier 可信来源，不能是 prover 自报，也不能只用 `expected_step_bound` 上界替代（`expected_step_bound` 不等于实际 `total_steps`）；本轮术语修正不代表已实现 counter 或可信 T（`execution_anchor_statement.md` Q3/Q4）。
 4. **VK 应由谁固定，如何绑定 program/circuit？** —— 由可信 setup/ceremony 生成、可信分发给 verifier 并固定（Model A/C）；通过 `vk_id ↔ program_id/circuit_digest` 映射绑定。固定 VK ≠ 固定 program，两者并列必需（`verifier_vk_trust_model.md` §5）。
 5. **program identity 如何防止 prover 自行替换？** —— 最小路径 P1-A-1：verifier 固定预期完整 opcode table，逐项比对 proof public inputs + 固定 VK；无需新增电路承诺（比 digest 方案简单）。当前缺 verifier 主体与固定表（`verifier_independence.md` §2.2）。
-6. **execution_id 如何防止跨执行 proof 拼接？** —— 必须由 verifier/可信调用方在请求开始时生成并固定，写入**所有**相关 proof 的 statement，绑定 program/输入/T/VK；当前无此对象，prover 侧 `enc_key` 不满足（`execution_anchor_statement.md` Q2；`proof_composition_binding.md` §0 第 1 条）。
+6. **execution_id 如何防止跨执行 proof 拼接？** —— 必须由 verifier/可信调用方在请求开始时生成并固定，写入**所有**相关 proof 的 statement，绑定 program/输入/`total_steps`（及受约束派生的 `last_step_index`）/VK；当前无此对象，prover 侧 `enc_key` 不满足（`execution_anchor_statement.md` Q2；`proof_composition_binding.md` §0 第 1 条）。
 7. **哪种 proof composition 方向最可行，证据是什么？** —— 逻辑上 Option A（统一 anchor）跨 proof 边界最可控、Option C（联合证明）边界最少，但两者都依赖承诺层与 verifier 固定 anchor 前置；当前**无证据**支持任一方向可接入（三方案均 `CONSTRUCTED`、当前 `BLOCKED`）。本轮不选胜者（`proof_composition_binding.md` §4/§5）。
 8. **哪些信任假设是不可消除的？** —— 至少三项：① 一个 verifier 可信持有 VK 与预期 statement 的信任根（固定配置或注册表）；② VK↔program 映射的写入权受控；③ execution_id 的产生方（verifier/可信调用方）被信任。这些假设只能转移（如从 prover 转到注册表），不能消除（`verifier_vk_trust_model.md` §3）。
 9. **当前架构能否在不引入新信任根的前提下完成上述绑定？** —— **不能**（`INFERRED`）。六项能力全部要求把字段从"prover/host 自我声明"提升为"verifier 可检查"，必然引入新可信来源或改变信任模型；不存在既不引入信任根、又不改信任模型的绑定方案。
@@ -48,7 +48,7 @@
 | Program identity | opcode table 是 prover JSON 的 public input；检索无 program_id/hash（`VERIFIED` 缺失） | verifier 固定预期完整 opcode table（P1-A-1）或可信派生 program_id | 独立 verifier + 固定 VK + 逐项比对 | 无隐私代价；新增"固定表分发"信任 | `BLOCKED_BY_TRUST_MODEL` |
 | Execution identity | 无 execution_id；`enc_key=Random()` 每执行一值、私有 witness（`VERIFIED` 缺失） | verifier/可信调用方生成并固定 execution_id | 写入所有 proof statement + 绑定 program/输入/T/VK | 公开 id 通常可接受；新增"id 产生方可信"假设 | `BLOCKED_BY_TRUST_MODEL` |
 | Public input provenance | public inputs 全部来自 prover JSON（`plonk.rs:143-161`） | verifier 固定/校验期望 public input | verifier 持有期望值并比对 | 无隐私代价；新增"期望值来源可信"假设 | `BLOCKED_BY_TRUST_MODEL` |
-| Trusted T | halt 是 public output（电路算），但 break 由 host、T=host 记录且不进 statement（快照 L419-421/L601） | verifier 固定 T 或电路 counter 受约束产生 + verifier 核对 | 电路 counter + halt↔末项绑定 + T 进 statement | 公开 T 通常可接受；需改 VM 电路 | `BLOCKED_BY_TRUST_MODEL`（电路侧 `BLOCKED_BY_CURRENT_INTERFACE`） |
+| Trusted T | halt 是 public output（电路算），但 break 由 host、`total_steps`（T）=host 记录且不进 statement（快照 L419-421/L601） | verifier 固定 `total_steps = T`（含 step 0）或电路 counter 受约束产生 + verifier 核对；`last_step_index = T-1` 由同一 counter 派生 | 电路 counter + halt↔`last_step_index` 绑定 + `total_steps` 进 statement（`[1,T-1]` 共 `T-1` 个 Fetch 事件）；`expected_step_bound` 仅为上界 | 公开 T 通常可接受；需改 VM 电路 | `BLOCKED_BY_TRUST_MODEL`（电路侧 `BLOCKED_BY_CURRENT_INTERFACE`） |
 | VK identity | `test_rng()` 现场生成、同函数 setup/prove/verify（`plonk.rs:302-304`） | 可信 setup/ceremony + 可信分发 + verifier 固定 | 独立 verifier + `vk_id↔program_id` 映射 | 新增"注册表/分发"信任根（Model C）或配置信任（Model A） | `BLOCKED_BY_TRUST_MODEL` |
 | Cross-proof binding | 三 proof 只靠宿主内部哈希比对；无共享公开承诺/递归（快照 L174-181/L306-332/L410-583） | 受约束公共 anchor + 各 proof 电路内绑定（或联合证明） | Option A/B/C 三选一 + 承诺层 | 承诺 binding/hiding 信任面；递归接口改造 | `BLOCKED_BY_TRUST_MODEL`（承诺层 `UNKNOWN`/`BLOCKED`） |
 
@@ -79,7 +79,7 @@
 **BLOCKED（信任模型/架构缺必要能力）**：
 - 固定 commit 无独立 verifier 主体、VK 现场生成、public inputs 来自 prover（`plonk.rs:293-315`）；
 - 无 execution_id / program_id / program_hash（快照全检索无命中）；
-- T 不进 statement、break 与最终 T 由 host 控制（快照 L419-421/L601）；
+- `total_steps`（T）不进 statement、break 与最终 T 由 host 控制（快照 L419-421/L601）；`last_step_index = T-1` 未受约束，Fetch 域 `[1,T-1]` 的可信 T 来源缺失；
 - 无 VK↔program 绑定、无 verifier 固定 statement；
 - 无跨 proof 共享公开承诺、无递归/组合证明接口；
 - 承诺层（binding/hiding）——属前置未决（`../aba-03-d2/decision.md`）。
@@ -93,5 +93,6 @@
 - **D3-03-01 不回改**：`BLOCKED_BY_CURRENT_INTERFACE` 与依赖图、UNKNOWN/BLOCKED 清单保持原样。
 - **未实现** commitment、execution anchor、verifier、电路、原型；**未运行**测试或性能实验；**未改**任何既有文档、源码、测试、配置、数据。
 - 只读复用固定 commit 源码快照与既有审计文档；只读核对了快照接口与行号（未混入其他版本源码）；grep 确认固定快照无 `execution_id`/`program_id`/`program_hash`。
-- 冻结语义保持：real: `lookup=trace=reg0`；dummy: `lookup=reg0`、`trace=p−1`、不强加 lookup=sentinel、不承诺/不公开 `reg0`；step0 无 Fetch、无承诺事件。
+- 冻结语义保持：real: `lookup=trace=reg0`；dummy: `lookup=reg0`、`trace=p−1`、不强加 lookup=sentinel、不承诺/不公开 `reg0`；step 0 有 VM 执行与 trace row，但无 Fetch proof、无 Fetch commitment event。
+- **术语勘误（本轮唯一变更）**：`total_steps = T` 为 VM 总执行步数（含 step 0），`last_step_index = T-1` 为最后实际执行的 step index，Fetch 事件索引 `[1,T-1]`、总数 `T-1`；不再使用旧的语义不明确末步字段。本轮未实现 counter，也未取得 verifier 可信 T；所有既有判定与 HOLD 不变。
 - **完成后停止**：不启动下一阶段（D3-03-03 等），不实现 R5–R8 电路，不启动独立 verifier/anchor 原型，不扩展到 P1-A / VK / P2 的实现，不解除任何 HOLD。等待独立审查。
