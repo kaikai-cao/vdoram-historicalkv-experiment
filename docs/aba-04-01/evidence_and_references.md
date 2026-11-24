@@ -83,14 +83,15 @@
 | I2 | Merkle consistency proof 只保证 append-only/包含关系，不保证被追加事件的内容语义或来源可信 | L4 §2.1.2/§7 + 规范边界 | `VERIFIED`（规范）+ `INFERRED`（映射到事件） |
 | I3 | lookup/permutation 证明集合包含或置换关系；用于事件- trace 跨表一致性是可构造的应用，但"值属于表"不等于"来自真实执行步骤" | L2/L7 + S4 | `PAPER_CLAIM` + `CONSTRUCTED` |
 | I4 | 相同 `eid`、相同摘要、hash chain、签名只能作公开引用；witness 同一性与事件内容完整性仍需电路约束 + linking/opening proof | S1/S2/S6 + L8/L9 | `CONSTRUCTED` |
-| I5 | zkVM 若用统一 trace 关系（step column + 边界约束）已覆盖 P1/P2/P3/P5，本研究仅拆成两证明再声称"跨证明绑定"为新贡献不能成立 | L1/L10/L11 + I1 | `INFERRED`（待 `related_work.md` 逐项核实） |
+| I5 | zkVM/可验证 RAM 若用统一 trace 关系（step column + 边界约束）已在其**自身固定事件语义**下覆盖 P1/P2/P3/P5；本研究仅拆成两证明再声称"跨证明绑定"为新贡献不能成立。该结论已由 `related_work.md` §6/W22（VDORAM 官方 PDF 全文）、§7/§8 逐项核实；不外推到任意应用 `φ`/`S_req` | L1/L10/L11/L5 + I1 + `related_work.md` §6–§9 | `INFERRED`（逐项核实完成；外推到任意 φ 为 `UNKNOWN`） |
 
 ---
 
 ## 5. 未决与不得写成已验证的事项
 
-- `UNKNOWN`：NDSS 2026 VDORAM 论文全文声称与具体证明关系的逐项对应；本轮只读录用元数据与历史冻结文档。
-- `UNKNOWN`：各 zkVM 实际证明关系是否覆盖 P1–P5 的逐项判断——以 `related_work.md` 的对照表为准，且需原文/规范依据。
+- **已核实（不再是 `UNKNOWN`）**：NDSS 2026 VDORAM 论文全文与具体证明关系的逐项对应，已由官方 PDF 全文核对，登记于 §2/L5 与 `related_work.md` §6/W22；P1–P3/P5 在其**逐周期访问记录语义**下 `VERIFIED`。初稿"只读录用元数据"的旧状态已作废。
+- `UNKNOWN`：把 VDORAM/Cairo/RISC Zero 等的具体事件语义外推到任意应用 `φ`/`S_req` 下的 P1–P3 是否成立；需把该应用的事件生成条件与必需集合纳入证明关系后重新判断。
+- `UNKNOWN`：各 zkVM 实际证明关系对 P1–P5 的逐项判断中，仅取得博客/第三方综述、无原始论文者（如 SP1、zkSync Era）——以 `related_work.md` 的对照表为准。
 - `UNKNOWN`：本研究相对既有工作是否具有可发表新颖性；需逐项对照 + 可证定理 + 最小实验后判断。
 - `UNKNOWN`：候选构造的具体门数、证明大小、时间成本；本轮不实测。
 - `BLOCKED`：跨证明同 witness linking relation 若无法明确构造，则 P4 不可验证，相关方案不可标为实现可行。

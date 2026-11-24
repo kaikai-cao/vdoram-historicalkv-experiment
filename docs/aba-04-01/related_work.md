@@ -130,8 +130,8 @@
 
 ### W19 — Cross-domain NIZK（ePrint 2019/063）
 
-- **解决的语义**：MPC-in-the-head（ZKB++）绑定到 Pedersen 承诺 C：证明 C 中为同一值。
-- **P4** `INFERRED`（MPC 视图绑定公开承诺的实例）；其余 `UNKNOWN`。
+- **解决的语义**：跨域 NIZK 的一个具体实例——把基于 MPC-in-the-head（ZKB++）的证明与公开 Pedersen 承诺 C 关联，示例为证明"对 RSA/DSA 签名的知识"与承诺 C 中是同一值。它是**针对特定跨域承诺关联的一次构造展示**，不是通用的"跨证明同执行绑定"方案，也不是通用"MPC 视图绑定公开承诺"框架。
+- **P4** `INFERRED`（仅作为一种特定跨域承诺关联实例，提示"可把公开承诺纳入证明关系"这一思路；不足以据此声称一般性 P4 已解决）；其余 `UNKNOWN`。
 
 ---
 
@@ -159,8 +159,9 @@
   - 每个指令周期在指令执行电路内生成 `m = (addr, t, op, val)` 并插入 `[M]`；非内存指令插入 dummy 访问（§IV-D 步 7, p.10；§IV-A 图 2, p.6）；`t` 为 public timestamp 单调递增，halt 时停止（§IV-C/§IV-D 步 3/8）；停机后 sort + permutation check + 相邻一致性式 (1)（§IV-C, p.8）。
   - §IV-E.3 明确 "Total number of iterations (T)... made public. This is necessary to halt the machine"；"The number of memory accesses equals to the total number of instruction cycles"；I/O 与 halt 指令类型公开。
   - 所有电路调用 collaborative zkSNARK 得到**一个**非交互简洁证明 π（§IV-D 步 11）。
-- **P1–P5**：P1 `VERIFIED`（事件元组在指令执行电路内产生，extractor 恢复完整执行）；P2 `VERIFIED`（每周期恰好一条含 dummy，访问数=周期数，permutation 保证排序未改写值）；P3 `VERIFIED`（t 单调递增 + 按 (addr,t) 排序 + 式 (1) 相邻检查）；P5 `VERIFIED`（T 公开、halt 类型公开、最终状态被 extractor 恢复并在 T 次访问上 trace verification）；P4 `UNKNOWN`（**单证明，无两证明绑定场景**；多方 witness 绑定 `VERIFIED`：单一公开 x 下 `(x,w_0,...,w_{m-1}) ∈ R`，extractor 恢复联合 witness，§III-B.1/Def IV.1）。
-- **差异（决定性）**：**P1–P3、P5 以及多方 witness 绑定由一个统一 trace/R1CS 关系一次性解决**；"拆成执行证明 + 事件证明后再声称跨证明绑定"在本论文框架内**没有对应缺口**；公开 statement 不含独立 eid/事件列表/事件摘要字段。
+- **P1–P5（适用范围限定）**：以下判断的对象是 **VDORAM 自身定义的事件语义**——"每个指令周期恰好产生一条访问记录 `m=(addr,t,op,val)`，非内存周期为 dummy"，且其事件生成条件与必需记录集合由该系统固定（等价于 `problem_definition.md` 中 `φ` = 逐周期记录、`S_req` = 全部周期）。P1 `VERIFIED`（访问元组在指令执行电路内产生，extractor 恢复完整执行）；P2 `VERIFIED`（每周期恰好一条含 dummy，访问数=周期数，permutation 保证排序未改写值）；P3 `VERIFIED`（t 单调递增 + 按 (addr,t) 排序 + 式 (1) 相邻检查）；P5 `VERIFIED`（T 公开、halt 类型公开、最终状态被 extractor 恢复并在 T 次访问上 trace verification）；P4 `UNKNOWN`（**单证明，无两证明绑定场景**；多方 witness 绑定 `VERIFIED`：单一公开 x 下 `(x,w_0,...,w_{m-1}) ∈ R`，extractor 恢复联合 witness，§III-B.1/Def IV.1）。
+- **外推边界（不得越过）**：上述 `VERIFIED` **不能直接外推**到 `problem_definition.md` 中任意应用事件策略 `φ` 与任意必需集合 `S_req`。论文证明的是它自己固定的"逐周期记录"语义；对条件触发、只记录子集、或自定义事件类型的应用，必须把该应用的 `φ` 与 `S_req` 显式纳入证明关系后重新判断，不能仅凭 VDORAM 结果给任意 `φ` 标 `VERIFIED`。
+- **差异（决定性）**：在其固定语义下，**P1–P3、P5 以及多方 witness 绑定由一个统一 trace/R1CS 关系一次性解决**；"拆成执行证明 + 事件证明后再声称跨证明绑定"在本论文框架内**没有对应缺口**；公开 statement 不含独立 eid/事件列表/事件摘要字段。
 - **与历史案例的关系**：本仓 HOLD 文档对固定 artifact commit 的实现判定（`BLOCKED_BY_CURRENT_INTERFACE`）是**该实现**的事实，不等于论文主张的上限；论文全文 P1–P3/P5 已 VERIFIED，二者需区分（见 `evidence_and_references.md`）。
 
 ### W23 — Constant-Overhead ZK for RAM Programs（Franzese, Katz, Lu, Ostrovsky, Wang, Weng, CCS 2021 / ePrint 2021/979）
@@ -185,11 +186,13 @@
 | P4 Cross-proof binding | **不适用**（单证明，`INFERRED`）；多方绑定已有 `VERIFIED` 构造（W16/W22） | 这些系统无"两独立证明靠相同字段"场景 |
 | P5 Termination binding | **VERIFIED**（VDORAM T 公开、Cairo final 寄存器公开、RISC Zero control 列）/ `INFERRED`（vnTinyRAM 上界） | 终止位置/公开 T 被约束 |
 
+**适用范围限定（重要）**：上表 P1/P2/P3/P5 的 `VERIFIED` 指这些系统**各自固定的事件语义**——VDORAM 的"逐周期访问记录（含 dummy）"、Cairo 的 trace 行、RISC Zero 的 trace 行。它证明的是"系统自身定义的事件在其统一关系内完整、有序、绑定终止"，**不等于**任意应用自定义 `φ`/`S_req` 下的事件完整性已被普遍解决。把具体系统的证明能力外推到任意应用事件策略，需要把该应用的 `φ`/`S_req` 纳入证明关系后重新判断（`UNKNOWN`）；这一点不改变"主流系统用统一关系、无两证明分离场景"的核心观察。
+
 **因此**：
 
 1. **P1/P2/P3/P5 不是开放问题**（`VERIFIED`/强 `INFERRED`）：VDORAM 论文全文已明确在一个统一关系内解决，Cairo/RISC Zero 等同样如此。
 2. **P4 只在"执行证明与事件证明分离"时产生**。主流可验证计算系统没有这种分离；若分离无独立必要性，P4 是人为制造的问题（`INFERRED`）。
-3. **"同执行/同 witness 绑定"本身已有成熟密码学机制**（`INFERRED`）：collaborative zkSNARK 的单一公开 statement + extractor（W16, `VERIFIED`）、VDORAM 的多方 witness 绑定（W22, `VERIFIED`）、commit-and-prove（W18）、Pedersen 绑定实例（W19）。递归/folding（W11–W14）与 accumulator（W20/W21）默认不提供，但把承诺纳入公开 statement 即可（已有构造）。
+3. **"一份证明内同执行/同 witness 绑定"本身已有成熟密码学机制**（`INFERRED`）：collaborative zkSNARK 的单一公开 statement + extractor（W16, `VERIFIED`）、VDORAM 的多方 witness 绑定（W22, `VERIFIED`）、commit-and-prove（W18）。W19 仅是"把公开承诺纳入证明关系"的一个特定跨域关联实例，**不是通用跨证明绑定方案**，不得据此声称一般性 P4 已解决。递归/folding（W11–W14）与 accumulator（W20/W21）默认不提供，但把承诺纳入公开 statement 即可（已有构造）。这些针对的是**单证明/联合 witness**场景；"两独立证明靠相同字段绑定"的通用情形仍 `UNKNOWN`，只是当前无必须分离的用例。
 4. 唯一可能的研究空间：证明**"必须分离证明"**的场景有真实必要性，且在该场景下现有 linking/commitment 机制不足。当前**无任何证据支持该前提**（`UNKNOWN`）。交 `decision.md` 裁决。
 
 ---
@@ -216,9 +219,9 @@
 | Collaborative zkSNARK 2021/1530 | INFERRED | INFERRED | INFERRED | VERIFIED† | UNKNOWN | †单证明内多方绑定，非两证明 |
 | MPC-in-the-head STOC'07 | UNKNOWN | UNKNOWN | UNKNOWN | UNKNOWN | UNKNOWN | 单 prover 模拟多方 |
 | commit-and-prove 2016/074 | UNKNOWN | UNKNOWN | UNKNOWN | INFERRED | UNKNOWN | 先承诺后定 statement |
-| Cross-domain NIZK 2019/063 | UNKNOWN | UNKNOWN | UNKNOWN | INFERRED | UNKNOWN | MPC 视图绑定 Pedersen |
+| Cross-domain NIZK 2019/063 | UNKNOWN | UNKNOWN | UNKNOWN | INFERRED | UNKNOWN | 特定跨域承诺关联实例，非通用跨证明绑定 |
 | RFC 6962 / Trillian | UNKNOWN | UNKNOWN | INFERRED | UNKNOWN | UNKNOWN | consistency 仅 append-only；内容靠应用 |
-| **VDORAM NDSS'26** | **VERIFIED** | **VERIFIED** | **VERIFIED** | **UNKNOWN‡** | **VERIFIED** | ‡单证明无两证明场景；多方绑定 VERIFIED；无 eid/事件摘要公开字段 |
+| **VDORAM NDSS'26**（逐周期记录语义） | **VERIFIED** | **VERIFIED** | **VERIFIED** | **UNKNOWN‡** | **VERIFIED** | ‡单证明无两证明场景；多方绑定 VERIFIED；无 eid/事件摘要公开字段；P1–P3/P5 仅限其自身事件语义，不外推任意 φ/S_req |
 | RAM ZK CCS'21 2021/979 | INFERRED | INFERRED | INFERRED | UNKNOWN | INFERRED | 未直读正文 |
 | MacORAMa / Freecursive / EVO | INFERRED | UNKNOWN | UNKNOWN | UNKNOWN | UNKNOWN | 内存/硬件完整性，非执行事件 |
 
@@ -230,11 +233,13 @@
 
 | 性质 | 现有工作是否已解决 | 判断依据 |
 | ---- | ------------------ | -------- |
-| P1 | **是**（`VERIFIED`） | VDORAM/Cairo/RISC Zero：事件在电路/trace 内产生，extractor 恢复合法执行 |
-| P2 | **是**（`VERIFIED`，VDORAM/Cairo/RISC Zero） | 每步记账含 dummy、访问数=周期数、permutation 不变量 |
-| P3 | **是**（`VERIFIED`，VDORAM 时间戳/Cairo 时钟/RISC Zero permutation） | 步序即执行顺序 |
+| P1 | **是**（`VERIFIED`，各自固定语义） | VDORAM/Cairo/RISC Zero：事件在电路/trace 内产生，extractor 恢复合法执行 |
+| P2 | **是**（`VERIFIED`，各自固定语义；VDORAM/Cairo/RISC Zero） | 每步记账含 dummy、访问数=周期数、permutation 不变量 |
+| P3 | **是**（`VERIFIED`，各自固定语义；VDORAM 时间戳/Cairo 时钟/RISC Zero permutation） | 步序即执行顺序 |
 | P4 | 场景在主流系统中不存在；"同 witness 绑定"已有 `VERIFIED` 成熟构造（W16/W22） | collaborative 单 statement + extractor；commit-and-prove |
 | P5 | **是**（`VERIFIED`，VDORAM T 公开/Cairo final 公开/RISC Zero control 列） | 终止位置/公开 T 被约束 |
+
+> 上表"已解决"指各系统**自身事件语义**下由统一 trace 关系解决；对任意应用自定义 `φ`/`S_req` 的外推不在其证明范围内（`UNKNOWN`）。这一限定不改变 NO_GO 的核心依据（主流系统统一关系、无两证明分离场景）。
 
 - **总体**：候选问题表述中的 P1/P2/P3/P5 已被现有工作解决；P4 在统一 trace 系统里不构成缺口，而"跨实体/跨参与方同 witness 绑定"已有成熟密码学构造。
 - **不得写成"首次提出"**：本轮只是标记一个待裁决的研究空间，不断言新颖性。
