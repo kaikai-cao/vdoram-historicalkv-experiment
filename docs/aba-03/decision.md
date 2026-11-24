@@ -31,7 +31,7 @@
 - 静态程序分析与动态执行 trace 已分开：证书是离线 `CONSTRUCTED`，运行时绑定是待验证 `INFERRED`。
 - 两种绑定方案（C1/C2）已给出并比较；没有把静态 PC 列表当动态事件列表。
 - 十个攻击反例均已分析，且明确未实际执行。
-- 约束规格明确字段/整数语义与 `2^L ≤ p` no-wrap 条件，并指出 `p−1` 的低位别名风险。
+- 约束规格明确字段/整数语义与 `2^L ≤ p` no-wrap 条件，并指出“低位截断别名”风险：`p` 为奇数，`p−1` 的低 L 位不可能全为 1，风险在于截断值可能很小却通过比较，因此必须约束完整字段等式。
 - 成本未知项标 `UNKNOWN`，未虚构约束数。
 - 只新增 `docs/aba-03/` 六份文档；未修改任何既有文件；未运行代码测试。
 
@@ -41,5 +41,14 @@
 - ABA-02 决策 `GO_WITH_ADDED_INPUT_CONSTRAINTS` 不变；EXP-DORAM-06 `NO_GO_CURRENT_ARCHITECTURE` 不变。
 - 本轮**没有**新增 Halo2/R1CS 电路、测试脚本、CSV、基准数据或修改 HistoricalKV/Fetch/MemoryTrace/排序电路。
 - 本轮**没有**证明 R1CS 映射已实现、Halo2 电路已实现、协同证明后端可用或真实执行 trace 已绑定。
+
+## 6. ABA-03-C1 勘误（不改变本决策）
+
+本轮只修正两处文档事实/数学描述：
+
+1. **step 0**：不执行 MemoryFetch（`ZkProgramExecutor.cs:201-203`），但仍无条件追加一行 MemoryTrace（`:389-402`、`:85-97`）；该行 `is_mem_op=0`，不是真实访存事件。MemoryTrace 行数不得当作动态访存事件数。
+2. **`p−1` 低位别名**：`p` 为奇数，`p−1` 的低 L 位不可能全为 1；风险是低 L 位截断值可能很小却通过比较，故必须同时强制逐位 Boolean、完整字段等式 `addr=Σ2^j d_j (in F_p)`、整数位比较与 `2^L≤p`。
+
+修正只涉及 `constraint_spec.md`、`trace_binding_analysis.md`、`attack_cases.md`、`validation.md`、`decision.md`；`source_trace_audit.md` 未发现相关错误，未修改。没有实现电路、没有运行测试、没有改变上述 `HOLD` 结论。
 
 ABA-03 审计至此冻结；解除 HOLD 前不启动 ABA-04 或电路原型。

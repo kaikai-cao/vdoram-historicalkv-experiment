@@ -26,7 +26,8 @@ Phase 0 未触发停止条件；未执行 stash / reset / rebase / 覆盖操作�
 | --- | --- |
 | `ZkVmExecutorCircuitBoardGenerator.cs:215-249` | `inMemValWire` 私有输入；`inMemAddrWire = inRegisterWires[0]`（`:227`）；opcode 表私有输入与逐行哈希注释（`:247-248`） |
 | `ZkVmExecutorCircuitBoardGenerator.cs:920-1024` | `out_mem_val/out_mem_addr`（`:929-961`）、`out_trace_*`（`:968-1007`）、公开 `out_hash_mem_trace`（`:1009-1018`） |
-| `ZkProgramExecutor.cs:195-239` | step0 跳过 Fetch（`:201-203`）；`AddPrivate("in_mem_addr", thisRegisters[0])`（`:225-226`） |
+| `ZkProgramExecutor.cs:195-239` | step0 跳过 MemoryFetch（`:201-203`）；`AddPrivate("in_mem_addr", thisRegisters[0])`（`:225-226`） |
+| `ZkProgramExecutor.cs:85-97,389-408` | `AddMemoryTrace` 直接 `memoryTrace.Add`（`:96`）；每步执行后 `:389-402` 无条件追加一行 MemoryTrace，包括 step 0；`:404-408` 同样保存 `out_hash_mem_trace` |
 | `ZkProgramExecutor.cs:140-194` | `opcode_table_*` 整表 `AddPublic`（`:147-157`）；哈希连续性外部检查（`:170-181`） |
 | `ZkProgramExecutor.cs:338-357` | `out_mem_addr` 被读取后未使用；`:348` 注释称“Load 时 reg0、否则 0”，与电路实际（Store 时 reg0、否则 NegOne，`:941-961`）不一致。本轮以电路代码为准，视该注释为过期 |
 | `InstructionFetchCircuitBoardGenerator.cs:120-169` | opcode 表公开输入（`:126-156`）、PC 逐行选择（`:158-169`） |
@@ -38,7 +39,7 @@ Phase 0 未触发停止条件；未执行 stash / reset / rebase / 覆盖操作�
 
 ## 4. 三份并行审计的一致性
 
-- VM 指令/地址审计、Fetch/trace 审计、程序/证书审计均独立确认：`reg0` 是唯一地址源；dummy 地址为 `p−1`；step0 无 Fetch；Prove 电路不接收 pc/opcode；静态证书与运行时解耦；上游无整程序承诺。
+- VM 指令/地址审计、Fetch/trace 审计、程序/证书审计均独立确认：`reg0` 是唯一地址源；dummy 地址为 `p−1`；step0 不执行 MemoryFetch 但仍追加 MemoryTrace 行，行数不等于真实访存事件数；Prove 电路不接收 pc/opcode；静态证书与运行时解耦；上游无整程序承诺。
 - 分歧：无实质分歧。仅 `ZkProgramExecutor.cs:348` 的过期注释与电路行为不同，已按电路代码处理。
 - 所有审计均为只读，未修改任何文件。
 
@@ -68,3 +69,26 @@ ls docs/aba-03            -> 六个 .md 文件
 - `decision.md`：Phase F 最终决策 `HOLD` 与解除条件。
 
 提交与推送结果以最终汇报为准；本文件不声称任何已执行但尚未核验的同步状态。
+
+## 8. ABA-03-C1 文档勘误记录
+
+本轮是**纯文档勘误**，没有重新开展设计审计、没有实现电路、没有运行代码测试；`source_trace_audit.md` 未发现相关错误，按授权范围未修改。
+
+### 8.1 step 0 语义
+
+只读复核固定上游源码：
+
+- `ZkProgramExecutor.cs:201-203`：`globalStepCounter == 0` 时 `memVal = zeroShare`，**不构造 MemoryFetch 电路**；`MemoryTraceFetchCircuitBoardGenerator.cs:8` 的 `traceCount > 0` 只约束被实例化的 Fetch 电路。
+- `ZkProgramExecutor.cs:389-402`：每步执行后**无条件**调用 `AddMemoryTrace`；`AddMemoryTrace` 在 `:85-97` 直接 `memoryTrace.Add`。因此 **step 0 仍产生一行 MemoryTrace**。
+- 该行由 `out_trace_*` 生成；step 0 选中 PC0 的非内存指令 `Set R15,1`，故 `is_mem_op=0`（`ZkVmExecutorCircuitBoardGenerator.cs:968-1007`），地址写哨兵 `p−1`、值写 0。
+- 结论：**MemoryTrace 行数 ≠ 动态访存事件数**。真实访问事件必须按电路内派生的 `is_mem_op=1` 过滤，不能按 trace 行数统计。
+
+已据此修正 `trace_binding_analysis.md` C2 的 step 0 表格项与事件定义、`attack_cases.md` 第 7/8 项；`validation.md` 对应记录同步更新。
+
+### 8.2 `p−1` 低位别名
+
+固定域 `p = 0x12ab655e9a2ca55660b44d1e5c37b00159aa76fed00000010a11800000000001` 为奇数，因此 `p−1` 为偶数，**其低 L 位对任意 `L≥1` 都不可能全部为 1**；原描述不成立，已删除。一次性算术核验（无文件写入）得到：`p−1 mod 2^5 = 0`、`p−1 mod 2^16 = 0`，且 `L=1..8` 时低位全 1 均为 false。
+
+准确风险是：若只检查低 L 位截断值而不约束完整字段元素，`(p−1) mod 2^L` 可能是很小的整数（如 `L=5` 时为 0），可通过小范围比较，但它不是原始字段元素 `p−1`。防御条件不变且必须同时成立：逐位 Boolean、`addr = Σ 2^j · d_j (in F_p)` 的完整字段等式、整数位比较，以及 `2^L ≤ p` 无回绕条件。
+
+已据此修正 `constraint_spec.md` B2、`attack_cases.md` 第 2 项；`decision.md` 保持 `HOLD` 不变。

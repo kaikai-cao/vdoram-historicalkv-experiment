@@ -48,7 +48,7 @@ program_hash = H_prog(opcode_table)                         # 新增公开锚点
 E = [(step_k, pc_k, opcode_k, addr_k)]_{k=1..m}
 ```
 
-其中 `E` 恰好是全体 `is_mem_op=1` 的步按 step 递增排列的子序列；公开 `m = event_count`。再把静态证书中的访存点（PC 4/16/18/22/24/36，规则 R-INPUT/R-INNER/R-OUTPUT）映射到 `E` 并核对次数/区间。
+其中 `E` 恰好是全体 `is_mem_op=1` 的步按 step 递增排列的子序列；公开 `m = event_count`。再把静态证书中的访存点（PC 4/16/18/22/24/36，规则 R-INPUT/R-INNER/R-OUTPUT）映射到 `E` 并核对次数/区间。**MemoryTrace 行数不等于动态访存事件数**：step 0 与非内存步都会产生 trace 行，但其 `is_mem_op=0`，不得计入 `E`。
 
 ### 必须处理的情况
 
@@ -56,7 +56,7 @@ E = [(step_k, pc_k, opcode_k, addr_k)]_{k=1..m}
 | --- | --- | --- |
 | 循环同一 PC 多次执行 | 按 step 产生**多个**事件；证书 PC 只能作为“允许访问的 PC 集合”，不能作为事件数上限 | 把静态 PC 列表当动态列表会漏掉重复访问，安全性看似通过实则未覆盖 |
 | dummy Fetch | 用 `is_mem_op=1` 过滤；Prove 电路本身忽略 `is_mem_op`（Prove 原始 L164-165），traces 中仍有 NegOne 行 | 把 dummy 计为真实事件会引入 `addr=p−1` 的伪访问 |
-| step 0 | 无 trace 行（`ZkProgramExecutor.cs:201-203`），事件从 step≥1 开始 | 要求 step0 提供事件会与执行器语义冲突 |
+| step 0 | 不执行 MemoryFetch（`ZkProgramExecutor.cs:201-203`），但 `:389-402` 仍无条件追加一行 MemoryTrace；该行由 `out_trace_*` 生成，`is_mem_op=0`（选中 PC0 的非内存指令 `Set`）、地址哨兵 `p−1`、值 0，不是真实访存事件。事件过滤后 step0 不产生事件 | 把 MemoryTrace 行数当事件数会把 step0 行误计为访问；要求该行成为事件会与 `is_mem_op=0` 冲突 |
 | 分支未执行的静态访存 PC | 不产生事件；证书只能说明“若执行则该地址有界” | 要求每个静态 PC 至少出现一次会拒绝合法执行路径 |
 | 程序提前终止 | 以 `out_halt` 步为界，公开 `event_count=m` 并证明 `E` 无遗漏 | 证明者可截断事件序列，隐藏越界访问 |
 | 事件计数、顺序、完整性 | 需逐步 running index：遇到 `is_mem_op=1` 则 index+1；最后断言 `index = m`；并约束 step/pc 单调递增 | 只检查“出现的事件合法”无法排除“删掉的事件非法” |
