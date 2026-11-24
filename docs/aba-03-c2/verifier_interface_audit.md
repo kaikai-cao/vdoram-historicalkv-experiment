@@ -9,7 +9,7 @@
 
 ## 0. 一句话结论
 
-**两者都缺。** 现有路径缺少独立 verifier（proof 由 prover 进程用现场生成的 vk 与自身提供的 public inputs 自测），也缺少电路级绑定接口（地址是私有 witness，跨电路无共享公开承诺；整程序承诺不存在）。可复用的只是「公开输入通道 + 标准 verify 函数 + 逐行哈希 gadget」，不足以闭合 P1/P2。决策：`REQUIRES_CIRCUIT_INTERFACE_CHANGE`；ABA-03 的 `HOLD` 不解除。
+**两者都缺，但缺口性质不同（勘误 C1 收紧）。** 现有路径缺少独立 verifier（proof 由 prover 进程用现场生成的 vk 与自身提供的 public inputs 自测）。**P1 可复用现有 public-input 通道闭合**：opcode table 已是公开输入，独立 verifier 可持有预期完整表逐项比较（方案 P1-A），整程序 commitment 仅为可选的摘要化方案（P1-B），不是唯一路径。**P2 无法只靠 verifier 闭合**：地址是私有 witness、跨电路无共享公开绑定，必须新增电路/证明接口层面的同一性关系。可复用项为「公开输入通道 + 标准 verify 函数 + 逐行哈希 gadget」。决策：`REQUIRES_CIRCUIT_INTERFACE_CHANGE`（整体目标需补验证接口与 P2 电路绑定接口）；ABA-03 的 `HOLD` 不解除。
 
 ---
 
@@ -57,9 +57,35 @@
 | verifier 是否独立持有预期 opcode table 或其 digest？ | **否**。无独立 verifier（§A8）；`verify_proof` 只有 `pvk/proof/public_inputs` 三参数（`verifier.rs:27-31`），public_inputs 全部来自 prover JSON | `plonk.rs:293-315`、`verifier.rs:27-61` | VERIFIED |
 | 是否有 verifier 侧固定 program ID / program hash / 电路专属 vk？ | **否**。vk 由 `test_rng()` 现场生成（`plonk.rs:302-304`）；C#/Rust 全树检索 `program_id|program_hash|digest` 无命中（详见 `../aba-03/source_trace_audit.md` §证书绑定项） | `plonk.rs:302-304` + 检索 | VERIFIED |
 | 逐行哈希能否被 verifier 绑定到一张固定的完整表？ | **不能**。`out_hash_opcode_table_row` 的 preimage 含 `inGlobalStepCounter` 与随机 `enc_key`（`InstructionFetchCircuitBoardGenerator.cs:215-235`，`MagicNumber.cs:21-24`）；执行器把该行输出作为私有输入送入 ZkVm 电路（`ZkProgramExecutor.cs:284-287`）并在宿主比对（`:326-332`）。它是逐步状态摘要，不是稳定 program digest；且只有「当前选中行」哈希，没有覆盖整表的承诺 | 原始行号 + `../aba-03/source_trace_audit.md` | VERIFIED |
-| 替换 opcode table 后是否有可核实的验证拒绝路径？ | **没有在本 commit 证据内找到**。替换 JSON 中 public opcode 行 → `to_plonk_circuit_multi_party` 用替换后的值构造 `v_circ`/`public` → 重新 setup/prove/verify 必然自洽通过。C# 的「manually verified by verifiers」是注释（`ZkVmExecutorCircuitBoardGenerator.cs:247-248`），不是代码 | `plonk.rs:203-247,293-315` | VERIFIED（无拒绝路径）；实际攻击是否跑通 = `UNKNOWN`（本轮不运行） |
+| 替换 opcode table 后是否有可核实的验证拒绝路径？ | **没有在本 commit 证据内找到 verifier 侧拒绝路径**。分层表述如下（见下方「替换论证的证据边界」）。C# 的「manually verified by verifiers」是注释（`ZkVmExecutorCircuitBoardGenerator.cs:247-248`），不是代码 | `plonk.rs:203-247,293-315` | VERIFIED（public map 进入 verify；无独立 verifier 持有期望表）；实际攻击是否跑通 = `UNKNOWN`（本轮不运行） |
 
-**P1 结论**：`VERIFIED` — 公开输入通道与标准 verify 函数可复用；**verifier 固定锚点与整程序承诺缺失**。
+**替换论证的证据边界（勘误 C1）**：
+
+- **已验证**：opcode table 作为 public inputs 进入 Rust 侧 public map（`plonk.rs:143-161`；C# 侧 `InstructionFetchCircuitBoardGenerator.cs:126-156`、`ZkProgramExecutor.cs:147-157`）。
+- **已验证**：当前路径没有独立 verifier 持有预期 opcode table 或其 digest（§A8、本表第二行）。
+- **未验证**：仅替换 JSON 中 opcode public wire 值、而保持其余 witness 与约束不变时，是否仍能成功证明。现有源码没有证明这种单独替换必然成功——`to_plonk_circuit_multi_party`（`plonk.rs:203-247`）同时从同一份 JSON 取约束结构与全部 wire 值，单独改动 public 行与其他字段之间的关系未被单独分析。
+- **合理推论（非攻击结果）**：若攻击者可同时控制电路描述、witness 与 setup，则可能构造另一套自洽的证明流程；这是**架构风险推论**，不是已执行攻击的结论。
+- **攻击实验状态**：`UNKNOWN`。本轮不运行任何攻击实验，不声称替换必然成功或必然失败。
+
+**P1 结论**：`VERIFIED` — opcode table 已进入 public inputs，公开输入通道与标准 verify 函数可复用；**独立 verifier 与其固定期望值（表或 digest）缺失**。整程序 commitment 不是唯一闭合路径，见下。
+
+### P1 最小闭合路径（勘误 C1：区分两种方案）
+
+**方案 P1-A：固定完整表比较（可复用现有 public-input 通道）**
+
+- 独立 verifier 持有**预期完整 opcode table**（可由固定上游字节码离线生成并可信分发）；
+- verifier 从 proof 的 public inputs 中取得 opcode table（该通道已存在：`plonk.rs:143-161` + C# `AddPublic` 点，无需新增电路输出）；
+- verifier 逐项比较 public table 与预期 table，不一致则拒绝；
+- 使用与该电路匹配、且预先固定/可信分发的 verification key 验证 proof（替换当前 `test_rng()` 现场生成 vk 的做法）。
+- **该方案不要求新增电路级整程序 commitment**；它复用现有公开输入通道，缺的是独立 verifier 主体、固定 vk 与固定预期表这三项接口/配置。
+
+**方案 P1-B：固定 digest 比较（可选的摘要化方案）**
+
+- 电路将完整 opcode table 与一个稳定的 `program digest` 绑定（新增电路内承诺关系）；
+- verifier 持有预期 digest 并核对，公开输入从整表压缩为单个 digest；
+- 这需要额外的电路承诺关系，属于**可选的摘要化方案**，不是 P1 的唯一闭合方式。
+
+**两方案关系**：P1-A 是 P1 的最小闭合路径（复用现有 public-input 通道）；P1-B 是在此之上的摘要化优化。不得把 P1-B 描述为 P1 的必要或唯一路径。
 
 ---
 
@@ -90,21 +116,22 @@
 
 | 条件 | 现有机制 | verifier 可验证性 | 缺口 | 证据等级 |
 |---|---|---|---|---|
-| P1 完整程序身份 | opcode table 四列为 public input（`InstructionFetchCircuitBoardGenerator.cs:126-156`）；逐行哈希 `out_hash_opcode_table_row` 含 step 与随机 enc_key；标准 `verify_proof` 存在 | 无独立 verifier；vk 现场 `test_rng()` 生成；public inputs 来自 prover JSON；无期望表/digest | ① verifier 固定整表或其稳定 digest；② 电路内覆盖全表的 program 承诺（替代含随机 enc_key 的逐步哈希）；③ 固定/独立分发的 vk | VERIFIED |
+| P1 完整程序身份 | opcode table 四列为 public input（`InstructionFetchCircuitBoardGenerator.cs:126-156`），该通道可直接复用；标准 `verify_proof` 存在；逐行哈希 `out_hash_opcode_table_row` 含 step 与随机 enc_key（仅影响 P1-B） | 无独立 verifier；vk 现场 `test_rng()` 生成；public inputs 来自 prover JSON；无期望表/digest | ① 独立 verifier；② 固定/可信分发的 vk；③ 固定预期**完整 opcode table**并逐项比较（P1-A，复用现有 public-input 通道，够用）；或可选的稳定 digest + 电路承诺（P1-B，摘要化方案，非必需） | VERIFIED |
 | P2 Fetch/trace 地址同一性 | 构造上同源于 `reg0`；电路内 Fetch 侧 `FieldEquals` 比对；跨电路靠宿主哈希 `throw` 检查 | 地址是私有 witness/私有输出，不在 proof statement；verifier 无可核对值；宿主检查不可见 | ① 电路内 `fetch_addr = reg0 = trace_addr` 同一性断言，或两电路共享公开承诺 `H_step(step,pc,opcode,reg0,is_mem_op)`；② verifier 侧公开输入锚定该承诺 | VERIFIED |
 
 ### 决策：`REQUIRES_CIRCUIT_INTERFACE_CHANGE`
 
-**明确回答「缺电路约束、verifier 接口、还是两者都缺」：两者都缺，且电路侧是硬缺口。**
+**明确回答「缺电路约束、verifier 接口、还是两者都缺」（勘误 C1 收紧）：P1 缺 verifier 接口，P2 缺电路绑定接口。**
 
-1. **verifier 接口缺**：固定 commit 内不存在独立 verifier 主体；proof 在 prover 进程内用现场 vk 与自身 public inputs 自测（`plonk.rs:293-315`），proof 不落盘、无外部 verifier 输入接口，也没有任何「prover 之外」的期望值来源（§A5-A8）。
-2. **电路绑定接口缺**：即便补上独立 verifier，P2 地址仍不在 proof statement，verifier 拿不到可核对值；P1 的逐行哈希含随机 `enc_key` 和 step，不是稳定 program digest，整表承诺不存在。二者都必须在电路侧新增承诺/断言接口才能表达。
+1. **P1 — 缺 verifier 接口，不缺电路承诺**：固定 commit 内不存在独立 verifier 主体；proof 在 prover 进程内用现场 vk 与自身 public inputs 自测（`plonk.rs:293-315`），无「prover 之外」的期望值来源（§A5-A8）。但 opcode table 已是公开输入，只要补上独立 verifier + 固定 vk + 固定预期完整表（P1-A），即可复用现有通道闭合 P1，**不必然需要新增电路级整程序承诺**；新增 digest 承诺（P1-B）只是可选摘要化方案。
+2. **P2 — 缺跨电路绑定接口**：即便补上独立 verifier，地址仍不在 proof statement，verifier 拿不到可核对值；必须新增电路/证明接口层面的 `fetch_addr = reg0 = trace_addr` 同一性关系，并由 verifier 锚定相关公开承诺或状态。**这是明确需要新增电路绑定关系的部分。**
 3. **不是 NO_GO**：架构无数学矛盾；可复用项为公开输入通道、标准 `verify_proof`、逐行哈希 gadget、MPC prove 数据通路（受 additive-only 限制，见 `../exp-doram-06/rust-authenticated-share-path.md` B.5/B.6）。
-4. **不是 PARTIALLY_REUSABLE**：两个条件各自都同时存在「可复用构件」与「关键缺口」，复用任一构件都无法独立闭合任一条件，不能据此宣称某一条件已有可用接口。
+4. **保留 `REQUIRES_CIRCUIT_INTERFACE_CHANGE`**：理由是整体目标既要补齐 P1 的验证接口，又必须补上 P2 的电路绑定接口；其中 P2 的电路新增是硬需求，P1 的最小闭合路径（P1-A）可复用现有 public-input 通道。不再暗示 P1 本身必然需要新增 program commitment。
 
 ### 对下一阶段的含义（本轮不执行）
 
-- 若目标是闭合 P1/P2，需同时补：独立 verifier 与固定 vk/public 锚点；电路内整程序承诺与跨电路地址共享承诺。这已经超出「最小化修改现有 VDORAM」的范围。
+- **P1 的最小闭合**：补独立 verifier、固定/可信分发的 vk、固定预期完整 opcode table 并逐项比较 public inputs（P1-A）；可复用现有 public-input 通道，不必然改电路。可选地再做稳定 digest + 电路承诺（P1-B）做摘要化。
+- **P2 的最小闭合**：必须新增电路/证明接口层面的跨电路地址同一性关系（同电路断言或共享公开承诺），并由 verifier 锚定该公开值；仅补 verifier 不足以闭合。这部分超出「最小化修改现有 VDORAM」的范围。
 - 本轮不解除 ABA-03 的 `HOLD`，不启动 ABA-04，不设计新协议，不写电路。
 
 ---
