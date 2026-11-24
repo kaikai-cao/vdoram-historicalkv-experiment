@@ -65,7 +65,7 @@
 
 **B 小结**：标准密码学性质优于哈希承诺（perfect hiding、DL 假设下的计算 binding），且 gadget 实现已在固定 commit 内；但其约束域/群变量模型与 CompatCircuit→PLONK 的 Fr-wire 通路不兼容，接入需要新 share 类型、群运算与可信生成器，**当前路径无法直接承载**。不得因理论性质优良就写成低成本可实现。
 
-**跨电路地址一致性**：只有在两电路各自正确约束自己的 opening、使用同一个承诺 `C`，并且该承诺的 binding 成立时，才能推出两侧消息地址相同；这不是无条件数学等式推论。Pedersen 的 binding 是离散对数假设下的计算性质，不能写成 perfect binding；MiMC 侧仍缺公开归约（`UNKNOWN`）。
+**跨电路地址一致性**：只有在两电路各自正确约束自己的 opening、使用同一个承诺 `C`，并且该承诺的 binding 成立时，才能推出两侧消息地址相同；这不是无条件数学等式推论。标准 Pedersen 还满足：若 `m_vm = m_fetch = m` 且 `C_vm = C_fetch`，则 `(r_vm − r_fetch)H = 0`，素数阶群且 `H` 非单位元 ⇒ `r_vm = r_fetch mod q`；同一承诺、同一消息下不能任意使用不同随机数。若 `m_vm != m_fetch` 却 `C` 相同，则两份 opening 给出 `G/H` 的 DL 关系，离散对数困难下由计算 binding 排除；不是 perfect binding。若要用独立 `r`，必须改为独立承诺 + 额外关联证明，属 `FUTURE CANDIDATE` / `UNKNOWN`，本轮不设计；MiMC 侧仍缺公开归约（`UNKNOWN`）。
 
 ---
 

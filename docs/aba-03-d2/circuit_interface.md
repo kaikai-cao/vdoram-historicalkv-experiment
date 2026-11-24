@@ -23,6 +23,8 @@ VerifyOpen(com_i, context_i, addr_i, r_i) -> {0,1}   # 电路内重算比较
 3. **opening 正确性**：两侧电路各自约束自己的 `(addr,r)` 重算出 `com`；
 4. **context 可信**：`program_id/execution_id/step/event_type` 由 verifier 锚定或电路约束（当前多为 `UNKNOWN`）。
 
+**Pedersen 特例**：两侧虽各自持有 opening witness，但若使用同一 `C` 且消息相同，则 `(r_vm − r_fetch)H = 0`，在素数阶群、`H` 非单位元下 `r_vm = r_fetch mod q`；不能把“独立 `r` 指向同一承诺”当作可选设计。若消息不同却 `C` 相同，则两份 opening 给出 `G/H` 的 DL 关系，由计算 binding 排除。
+
 ---
 
 ## 2. 双电路候选接口（伪代码，非真实代码）
@@ -33,6 +35,7 @@ VerifyOpen(com_i, context_i, addr_i, r_i) -> {0,1}   # 电路内重算比较
 VM_Circuit(public: program_id, execution_id, n,
            public_out: com_vm, event_type_vm_pub,
            private_witness: trace_addr_vm, r_vm, context_aux, is_mem_op_vm, reg0_vm):
+    # r_vm 是 VM 侧 opening witness；同一 Pedersen C + 同一消息 ⇒ r_vm = r_fetch mod q（代数结果）
     # 1) 由 opcode 派生 is_mem_op（上游骨架 ZkVmExecutor:968-976）
     constrain is_mem_op_vm == (opcode_vm == Load OR opcode_vm == Store)     # VERIFIED 骨架
     # 2) event_type 必须由 is_mem_op 派生，不能是 prover 自由声明
@@ -57,6 +60,7 @@ Fetch_Circuit(public: program_id, execution_id, step_fetch,
               public_out: com_fetch, event_type_fetch_pub,
               private_witness: fetch_lookup_addr, trace_addr_fetch, r_fetch,
                                is_mem_op_fetch, reg0_fetch, trace_row):
+    # r_fetch 是 Fetch 侧 opening witness；同一 Pedersen C + 同一消息 ⇒ r_fetch = r_vm mod q（代数结果）
     # 1) real/dummy 类型由电路内 opcode 派生，不能由 prover 声明
     constrain is_mem_op_fetch == (opcode_fetch == Load OR opcode_fetch == Store)  # CONSTRUCTED 接口
     constrain event_type_fetch == is_mem_op_fetch                          # CONSTRUCTED
@@ -69,13 +73,14 @@ Fetch_Circuit(public: program_id, execution_id, step_fetch,
     else:                      # dummy Fetch（step >= 1）
         constrain fetch_lookup_addr == reg0_fetch                          # lookup key 仍是 reg0，不强设为 p-1
         constrain trace_addr_fetch == p-1                                  # trace 哨兵
+        constrain FieldEquals(trace_row.mem_addr, p-1)                     # dummy trace row 必须是 p-1（CONSTRUCTED）
         # 不约束 fetch_lookup_addr == trace_addr_fetch；reg0 不进公开输入
     # 3) 承诺
     com_fetch = Commit((program_id, execution_id, step_fetch, event_type_fetch), trace_addr_fetch; r_fetch)
     public_out(com_fetch, event_type_fetch_pub)                             # CONSTRUCTED
 ```
 
-注意：Fetch 电路当前**不接收** `is_mem_op`/opcode（`MemoryTraceFetch...cs` 只处理 trace 列），要按 event_type 分支需新增输入与约束 → `CONSTRUCTED`。冻结语义是 `fetch_lookup_addr = reg0`（Fetch 用 `reg0` 作 lookup key）、`trace_addr = p−1`（dummy 步的 trace 哨兵），二者在 dummy 步本就不相等；**不得**强制 `fetch_lookup_addr == trace_addr`，也**不得**把 dummy 的 lookup address 强设为 `p−1`（`../aba-03-d1/p2_binding_semantics.md` §0）。real/dummy 必须由电路内 opcode 派生并绑定到对应公开 statement，不能由 prover 自由声明。step0 不在本伪代码的 Fetch 事件内。
+注意：Fetch 电路当前**不接收** `is_mem_op`/opcode（`MemoryTraceFetch...cs` 只处理 trace 列），要按 event_type 分支需新增输入与约束 → `CONSTRUCTED`。`trace_row` 指当前 `step_fetch` 对应的 VM trace 行（`out_trace_mem_addr` 列）：真实步该列为 `reg0`，dummy 步为 `p−1`（`../aba-03-d1/p2_binding_semantics.md` §0 的 `VERIFIED_SOURCE` 来源）。现有 Fetch 电路接收 `in_mem_addr` 并输出 `out_trace_mem_val`，未接收/强制 `trace_row.mem_addr`；把该行按 step 对应到当前 Fetch step 并加入 `FieldEquals(trace_row.mem_addr, p−1)` 是需要新增的 `CONSTRUCTED` 约束，**不是上游已实现事实**。若 step↔trace_row 对应关系无法证明，dummy 承诺语义不能闭合。冻结语义是 `fetch_lookup_addr = reg0`（Fetch 用 `reg0` 作 lookup key）、`trace_addr = p−1`（dummy 步的 trace 哨兵），二者在 dummy 步本就不相等；**不得**强制 `fetch_lookup_addr == trace_addr`，也**不得**把 dummy 的 lookup address 强设为 `p−1`。real/dummy 必须由电路内 opcode 派生并绑定到对应公开 statement，不能由 prover 自由声明。step0 不在本伪代码的 Fetch 事件内。
 
 ### 2.3 Verifier 比较
 
@@ -88,7 +93,7 @@ Verifier(proof_vm, proof_fetch):
     accept
 ```
 
-**相同承诺为何推出相同地址**：这不是无条件数学等式。只有在两电路各自正确约束自己的 opening（real 步 lookup key 与 trace 地址一致；dummy 步承诺 trace 哨兵、不强加 lookup key 相等）、使用同一个 `com`，且承诺 binding 成立时，才有 `com_vm = com_fetch` ⇒ 两侧承诺消息相同 ⇒ `trace_addr_vm = trace_addr_fetch`（见 `opening_and_randomness.md` Q3）。Pedersen 的 binding 是 DL 假设下的计算性质：若两份 opening 的消息不同，即可导出生成元间的 DL 关系；不是 perfect binding。MiMC binding 未证 → `UNKNOWN`；Pedersen `INFERRED` 且生成器信任 `UNKNOWN`；context 若不一致则即使地址相同也不应视为同一事件。
+**相同承诺为何推出相同地址**：这不是无条件数学等式。只有在两电路各自正确约束自己的 opening（real 步 lookup key 与 trace 地址一致；dummy 步承诺 trace 哨兵、绑定实际 trace row、不强加 lookup key 相等）、使用同一个 `com`，且承诺 binding 成立时，才有 `com_vm = com_fetch` ⇒ 两侧承诺消息相同 ⇒ `trace_addr_vm = trace_addr_fetch`（见 `opening_and_randomness.md` Q3）。Pedersen 特例：若 `m_vm = m_fetch` 且 `C_vm = C_fetch`，则 `(r_vm − r_fetch)H = 0`，素数阶群且 `H` 非单位元 ⇒ `r_vm = r_fetch mod q`；这是代数结果，不能把“两侧独立 `r`”当作可选设计。若消息不同却 `C` 相同，则两份 opening 导出 `G/H` 的 DL 关系，DL 困难下由计算 binding 排除，不是 perfect binding。MiMC binding 未证 → `UNKNOWN`；Pedersen `INFERRED` 且生成器信任 `UNKNOWN`；context 若不一致则即使地址相同也不应视为同一事件。
 
 ---
 
@@ -96,7 +101,7 @@ Verifier(proof_vm, proof_fetch):
 
 | 模式 | 公开输入内容 | verifier 比较 | 前提 | 评价 |
 | --- | --- | --- | --- | --- |
-| **模式 A**：两 proof 公开完全相同的 `com` | 每 proof 的 public 含 `com_i`（+event_type/step） | 直接比较两份 public 中的 `com_i` 相等 | 两电路导出同一 `com`（context 一致；两侧各自正确约束 opening，`r` 可不同） | 简单；但需保证 context 一致，且 binding 成立时 `r` 不同不影响地址一致性推论 |
+| **模式 A**：两 proof 公开完全相同的 `com` | 每 proof 的 public 含 `com_i`（+event_type/step） | 直接比较两份 public 中的 `com_i` 相等 | 两电路导出同一 `com`（context 一致；两侧各自正确约束 opening；Pedersen 同一 `C` + 同一消息下 `r` 代数相同） | 简单；但需保证 context 一致与 binding 成立，不能把“不同 `r`”当作推荐设计或成本节省 |
 | **模式 B**：两 proof 公开不同承诺，由更高层比较 | 每 proof public 含各自 `com_vm/com_fetch` 的承诺（如哈希） | 顶层 verifier/组合电路比较 | 需要顶层 statement 与 binding | 更复杂；接近 C3 递归方向（本轮不扩展 C3） |
 
 本轮聚焦**模式 A**（共享同一 `com`），这也是 D1 中 C2 的原意。模式 B 需要顶层 statement，超出本轮承诺可行性审查范围（且不自动解决 C2 的 binding/hiding/随机性问题）。
@@ -144,6 +149,7 @@ C_total(T) = T · (C_VM_commit + C_Fetch_commit + C_context + C_randomness)
 必须区分且**不得等同**：
 
 - R1CS/PLONK 约束数量 `≠` MPC 乘法数 `≠` 通信轮次 `≠` prove 时间 `≠` verifier 成本；
+- 共享承诺（模式 A）下不要把“两侧独立 `r`”当成推荐设计或成本节省：标准 Pedersen 同消息 + 同 `C` 强制 `r` 相同；若采用独立 `r`，必须改为独立承诺 + 额外关联证明，属 `FUTURE CANDIDATE` / `UNKNOWN`，成本未估；
 - 双电路重复计算：MiMC 两电路各算一次承诺 → 约 `2T` 次承诺调用（符号）；Pedersen 群运算成本 `UNKNOWN`；
 - MPC 通信轮次增加位置：若随机数需 MPC 联合生成/认证（当前 `BLOCKED`）、或 Pedersen 群元素需 MPC share（当前不支持）；
 - 非原生域运算：Pedersen 群运算非 Fr 原生（`UNKNOWN`/`BLOCKED`），MiMC 全 Fr 原生（`VERIFIED`）；

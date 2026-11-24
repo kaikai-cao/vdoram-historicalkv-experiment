@@ -28,26 +28,31 @@
 
 ### Q1. `r_vm` 与 `r_fetch` 是否需要相等？
 
-- **不需要相等**，前提是承诺具备 binding：若 `com_vm = com_fetch`，且两侧各自**正确开承诺**（即各自电路内约束 `Commit(context, addr_side; r_side) = com_side`），则 binding 保证 `(addr_vm, r_vm) = (addr_fetch, r_fetch)`，从而 `addr_vm = addr_fetch`。
-- 这是**条件性推论**，不是无条件数学等式：必须同时满足两电路各自正确约束自己的 opening、使用同一个承诺、且该承诺的 binding 成立；与两侧 `r` 是否相同无关。**MiMC 路径依赖未证明的 binding → `UNKNOWN`；Pedersen 路径在 DL 假设成立时得出计算 binding → `INFERRED`。**
+- **标准 Pedersen 下，同一承诺且同一消息时必然相等（mod q）**：设 `C_vm = C_fetch = C`、`m_vm = m_fetch = m`，则 `mG + r_vm H = mG + r_fetch H`，即 `(r_vm − r_fetch)H = 0`。在群阶 `q` 为素数、生成元非零且两侧正确约束 opening 的条件下，`H` 的阶为 `q`，故 `r_vm = r_fetch mod q`。这是群上的代数结果，不是额外安全假设；因此不能再说“不同 `r` 不影响地址一致性推论”或“同一承诺下允许两侧任意使用不同随机数”。
+- 若 `m_vm != m_fetch` 却 `C_vm = C_fetch`，则 `(m_vm − m_fetch)G = (r_fetch − r_vm)H`，两份 opening 给出 `G/H` 的离散对数关系；DL 困难且生成元关系未知时不可行（见 Q3）。
+- 因此，“相同承诺推出相同地址”的完整前提是：两侧各自正确约束自己的 opening、使用同一个 `C`、且 binding 成立；在 Pedersen 下同一消息还会代数地强制两侧 `r` 相同。**MiMC 路径依赖未证明的 binding → `UNKNOWN`；Pedersen 计算 binding → `INFERRED`。**
 
 ### Q2. 两边能否分别持有不同 opening randomness？
 
-- 可以，只要 binding 成立且两侧各自证明自己开的是同一个 `com`。不同 `r` 反而避免「同一随机数跨电路复用」带来的链接风险。**`CONSTRUCTED`（设计候选）**。
-- 但实现上：两个电路的 `r` 都必须是各自可约束的 witness，且都不能被 prover 事后重采样（见 §2）。
+- **在同一 Pedersen 承诺 + 同一消息下不能**：由 Q1 的代数关系，`r_vm = r_fetch mod q`，这不是可自由选择的选项，也不是“推荐设计”。
+- 若改为两侧使用**独立随机数与独立承诺**（`C_vm = Commit(m; r_vm)`、`C_fetch = Commit(m; r_fetch)`），各自 hiding 可以使用不同 `r`，但 verifier 不能再靠 `C_vm == C_fetch` 比较；必须另行设计证明两个隐藏地址相等的关系，并单独分析其 soundness、hiding 与 verifier 接口 → `UNKNOWN` / `FUTURE CANDIDATE`，本轮不设计、不声称已解决。
+- 随机数复用带来的链接风险单独在 Q8 分析，不能作为“同一 Pedersen 承诺下任意选不同 `r`”的理由。实现上，两个电路的 `r` 都必须是各自可约束的 witness，且都不能被 prover 事后重采样（见 §2）。
 
-### Q3. 在什么 binding 假设下，相同承诺推出相同地址（即使 r 不同）？
+### Q3. 在什么 binding 假设下，相同承诺推出相同地址？
 
-- **Pedersen**：DL 假设 + `G/H` 无已知关系 → 计算 binding。若同一 `C` 有两份 `m != m'` 的 opening，则 `mG + rH = m'G + r'H` 给出 `(m−m')G = (r'−r)H`，可直接导出生成元间的 DL 关系；DL 困难时这种碰撞不可行。因此**在两电路各自正确约束 opening、使用同一 `C` 且 binding 成立**时推出 `addr_vm = addr_fetch`，不是无条件等式，也不是 perfect binding。`INFERRED`。
+- **Pedersen，情况一（两侧地址相同、承诺相同）**：`m_vm = m_fetch = m` 且 `C_vm = C_fetch` 时，`mG + r_vm H = mG + r_fetch H` ⇒ `(r_vm − r_fetch)H = 0`。群阶 `q` 为素数、`H` 非单位元 ⇒ `r_vm = r_fetch mod q`。这是代数结果，不是独立随机数可任意选择的许可。
+- **Pedersen，情况二（两侧地址不同、承诺相同）**：`C = m_vm G + r_vm H = m_fetch G + r_fetch H` 且 `m_vm != m_fetch` 时，`(m_vm − m_fetch)G = (r_fetch − r_vm)H`，由此可导出 `G/H` 的离散对数关系；DL 困难且生成元关系未知时不能有效构造。因此是 **computational binding**，不是 perfect binding。
+- 综上，**在两电路各自正确约束 opening、使用同一 `C` 且 binding 成立**时推出 `addr_vm = addr_fetch`；同消息下的 `r` 相等不需要额外断言，不同消息下的双重 opening 由 binding 排除。`INFERRED`。
 - **MiMC 哈希**：需把 `H` 建模为抗碰撞/随机预言机，且 `com = H(context‖addr‖r)` 的编码无歧义；抗碰撞意味着不能找到两个不同 `(addr,r)` 同像。源码无此归约 → `UNKNOWN`。
 - 关键：**相同承诺 + 弱/无 binding 不能推出相同地址**。若 `H` 可被构造碰撞，攻击者可令 `(addr_vm,r_vm) ≠ (addr_fetch,r_fetch)` 但 `com` 相同，verifier 的相等检查通过而地址不等。
 
-### Q4. 如果随机数必须相同，如何证明两边用的是同一个 r？
+### Q4. 同一 Pedersen 承诺下是否需要额外公开 r 或单独添加跨电路 r 相等约束？
 
-- 若设计改为强制 `r_vm = r_fetch = r`（例如为简化 opening），则必须让 verifier 能核对这一点：把 `r` 作为**公开承诺的一部分**（例如 `com_r = Commit(r; r′)` 公开、两电路都绑定 `com_r`），或把 `r` 提升为公开输入（牺牲 `r` 的隐私，进而牺牲 hiding）。
-- 当前上游无任何跨电路共享随机值机制；`enc_key` 只在单执行内部逐电路宿主比对（`ZkProgramExecutor.cs:176-181,302-308,551-554`），不是共享公开承诺。`CONSTRUCTED` + `UNKNOWN`。
+- **不需要**：在两侧各自正确约束 `C_side = m_side G + r_side H` 且公开 `C_vm = C_fetch` 的前提下，同消息时 `r_vm = r_fetch mod q` 是 Q1 的代数结果；不同消息时若 `C` 相同则给出 DL 关系，由计算 binding 排除。把 `r` 提升为公开输入会牺牲 hiding，额外跨电路 `r` 相等约束在同一 Pedersen 承诺方案中没有必要。
+- 但这**不等于**当前接口已闭合：两侧必须分别正确约束自己的 opening；Pedersen 还需域/share 适配与可信生成器，仍为 `UNKNOWN` / `BLOCKED`（见 `commitment_candidates.md`）。
+- 若选择“独立随机数 + 独立承诺 + 额外关联证明”，则属于 `FUTURE CANDIDATE` / `UNKNOWN`，需单独分析 soundness、hiding 与 verifier 接口，本轮不设计。
 
-**结论**：推荐设计应让 `r_vm ≠ r_fetch`（各自持有），在“两电路各自正确约束 opening + 使用同一承诺 + binding 成立”的前提下推出地址相等；这不是无条件数学等式。该设计把关键推理压在 binding 上，而 MiMC binding 未证、Pedersen 虽在 DL 假设下有计算 binding 但接口不兼容（见 `commitment_candidates.md`）。
+**结论**：在同一 Pedersen 承诺下不能把“两侧独立 `r`”当作推荐设计；同一消息时 `r` 相等是素数阶群上的代数结果。相同承诺推出相同地址仍以“两电路各自正确约束 opening + 使用同一承诺 + binding 成立”为前提，不是无条件数学等式。MiMC binding 未证，Pedersen 虽在 DL 假设下有计算 binding 但接口不兼容（见 `commitment_candidates.md`）；独立随机数方案只能作为 `FUTURE CANDIDATE`，需另行设计与分析。
 
 ---
 
@@ -76,7 +81,7 @@
 
 - 这是承诺 **binding** 问题，与“谁能产生/选择 `r`”分开。prover 能自行选 `r` 只说明它控制生成，**不代表**能为同一 `com` 给出两个不同消息的 opening。
 - 若 `mG + rH = m'G + r'H` 且 `m != m'`，则 `(m−m')G = (r'−r)H` 直接给出生成元间的 DL 关系（非平凡，因为 `m−m' != 0`）。因此 Pedersen 的 binding 依赖离散对数困难，是 **computational binding**，不是 perfect binding；生成器可验证固定/无陷门仍 `UNKNOWN`。MiMC 侧无公开归约 → `UNKNOWN`。
-- 随机数复用可能造成承诺链接或消息关系泄露（`INFERRED`，方案相关），但**不得**写成所有随机数复用都直接破坏 binding；是否产生两份不同消息的 opening 要看承诺方案与电路对 opening 的约束。
+- 随机数复用（不同承诺/不同上下文重复使用同一 `r`）可能造成承诺链接或消息关系泄露（`INFERRED`，方案相关），这是**复用风险**；它与“同一承诺下两份不同消息 opening”的 **binding 问题**是两类风险，**不得**混写，也**不得**写成所有复用都直接破坏 binding。Pedersen 同承诺同消息会代数强制 `r` 相同（Q1），不能把“不同 `r` 指向同一 `C`”当作独立设计自由度。
 - 跨电路推出相同地址需：两电路各自正确约束 opening + 使用同一承诺 + binding 成立；不是无条件数学等式（见 Q1/Q3、`circuit_interface.md`）。
 
 ### Q9. 中止、重启与重新初始化时如何处理随机数？
@@ -125,8 +130,8 @@
 
 ## 5. 本阶段结论
 
-1. **`r_vm` 与 `r_fetch` 不必相等**；相同承诺推出相同地址以“两电路各自正确约束 opening + 使用同一承诺 + binding 成立”为前提，不是无条件数学等式。MiMC binding 未证 → `UNKNOWN`；Pedersen 是 DL 假设下的计算 binding → `INFERRED`，且生成器信任 `UNKNOWN`。
+1. **标准 Pedersen 同一承诺、同一消息下 `r_vm = r_fetch mod q`**（素数阶群 + 非单位元生成元上的代数结果）；不能推荐“两侧独立 `r` 指向同一 `C`”。相同承诺推出相同地址仍以“两电路各自正确约束 opening + 使用同一承诺 + binding 成立”为前提，不是无条件数学等式。MiMC binding 未证 → `UNKNOWN`；Pedersen 是 DL 假设下的计算 binding → `INFERRED`，且生成器信任 `UNKNOWN`。
 2. **当前 MPC 路径中的主动安全随机数认证是硬阻断**：CompatCircuit → PLONK 是 additive-only、无 MAC、无真实 Beaver/SPDZ 通路（`exp-doram-06` B.1-B.3）；这只说明现有架构无法认证 share，不等于所有 prover 本地随机数生成都不安全。
 3. **随机数分布/保密性、防重放、中止重启处理均未闭合**；当前 `enc_key` 只覆盖“每执行一值”，不足以充当安全 opening randomness。防重放需可信 `execution_id`、`step`、program/context 绑定与 verifier 检查，不能靠 `r` 的随机性解决。
-4. 若选择 Pedersen（perfect hiding 优势），随机数走群标量域且需新 share/群运算支持，`BLOCKED`；若选择 MiMC（域兼容），binding 与 hiding 都系于未证假设与随机数质量。Pedersen 的理论性质正确不等于已接入当前 PLONK/MPC 路径。
+4. 若选择 Pedersen（perfect hiding 优势），随机数走群标量域且需新 share/群运算支持，`BLOCKED`；若选择 MiMC（域兼容），binding 与 hiding 都系于未证假设与随机数质量。Pedersen 的理论性质正确不等于已接入当前 PLONK/MPC 路径；若要用独立 `r`，必须改为独立承诺 + 额外关联证明，属 `FUTURE CANDIDATE` / `UNKNOWN`，本轮不设计。
 5. 这是阻止进入原型的核心未知项之一（见 `decision.md`）。

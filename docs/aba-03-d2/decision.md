@@ -24,7 +24,7 @@
 
 ### Q1. 是否有可信的 binding 论证？
 
-**否，尚无可直接落地的 binding 论证。** MiMC 哈希承诺：固定 commit 使用 65 轮 MiMC（`MimcEncryptGadget.cs:12-14`）链式结构，源码无安全归约，无公开可验证 binding 证明 → `UNKNOWN`。Pedersen：在 DL 困难且生成元关系未知时有**计算 binding**（不是 perfect binding；若 `mG + rH = m'G + r'H` 且 `m != m'`，两份 opening 即导出 `G/H` 的 DL 关系）；但生成器由 `setup(rng)` 产生（`pedersen/mod.rs:50-65`），是否被 verifier 固定、是否有可验证生成过程，源码未给出 → binding 论证 `INFERRED` + 生成器信任 `UNKNOWN`。**“相同承诺 ⇒ 相同地址”不是无条件数学等式：需两电路各自正确约束 opening、使用同一承诺、且 binding 成立；这些前提当前未闭合。**
+**否，尚无可直接落地的 binding 论证。** MiMC 哈希承诺：固定 commit 使用 65 轮 MiMC（`MimcEncryptGadget.cs:12-14`）链式结构，源码无安全归约，无公开可验证 binding 证明 → `UNKNOWN`。Pedersen：在 DL 困难且生成元关系未知时有**计算 binding**（不是 perfect binding；若 `mG + rH = m'G + r'H` 且 `m != m'`，两份 opening 即导出 `G/H` 的 DL 关系）；同一 Pedersen 承诺下若 `m_vm = m_fetch = m` 且 `C_vm = C_fetch`，则 `(r_vm − r_fetch)H = 0`，素数阶群且 `H` 非单位元 ⇒ `r_vm = r_fetch mod q`，这是代数结果而非额外假设，不能推荐两侧使用独立随机数指向同一承诺；但生成器由 `setup(rng)` 产生（`pedersen/mod.rs:50-65`），是否被 verifier 固定、是否有可验证生成过程，源码未给出 → binding 论证 `INFERRED` + 生成器信任 `UNKNOWN`。**“相同承诺 ⇒ 相同地址”不是无条件数学等式：需两电路各自正确约束 opening、使用同一承诺、且 binding 成立；这些前提当前未闭合。**
 
 ### Q2. 是否有适用于小地址域的 hiding 论证？
 
@@ -44,7 +44,7 @@
 
 ### Q6. 两个电路是否能分别约束自己的 opening？
 
-**部分。** 电路内重算承诺在技术上可构造（`CONSTRUCTED`）：VM 侧已有 reg0 派生与范围骨架，Fetch 侧已有 `FieldEquals(trace_addr, in_mem_addr)`（`:52`），但该相等只能用于真实步；dummy 步必须显式分支（lookup key 仍为 `reg0`，trace 哨兵 `p−1`，不强加相等）。Fetch 电路当前不接收 `is_mem_op`/opcode，要按 event_type 分支需新增输入与约束（`CONSTRUCTED`）；且 binding 未闭合，使“相同 `com` ⇒ 相同地址”只能作为条件性推论而非无条件结论（Q1）。因此“分别约束 opening”的实现骨架在，**安全性未闭合**。
+**部分。** 电路内重算承诺在技术上可构造（`CONSTRUCTED`）：VM 侧已有 reg0 派生与范围骨架，Fetch 侧已有 `FieldEquals(trace_addr, in_mem_addr)`（`:52`），但该相等只能用于真实步；dummy 步必须显式分支（lookup key 仍为 `reg0`，trace 哨兵 `p−1`，不强加相等；实际 trace row 还需 `FieldEquals(trace_row.mem_addr, p−1)` 绑定，需新增约束 → `CONSTRUCTED`）。标准 Pedersen 下两侧各自持有 opening witness，但同一 `C` + 同一消息代数要求 `r_vm = r_fetch mod q`，不能把独立 `r` 当作推荐设计。Fetch 电路当前不接收 `is_mem_op`/opcode，要按 event_type 分支需新增输入与约束（`CONSTRUCTED`）；且 binding 未闭合，使“相同 `com` ⇒ 相同地址”只能作为条件性推论而非无条件结论（Q1）。因此“分别约束 opening”的实现骨架在，**安全性未闭合**。
 
 ### Q7. 固定 PLONK/MPC 接口是否支持？
 
@@ -84,5 +84,6 @@
 
 - 决策：`HOLD_INSUFFICIENT_EVIDENCE`。
 - **本轮最重要的结论**：承诺 binding、地址 hiding、随机数可信性、上下文锚定四件事必须拆开证明；当前没有一项形成完整可验证链。即使 Pedersen 理论性质最优（perfect hiding + DL 假设下的计算 binding）、MiMC 域内最易实现，也不能据此提前宣布可行性或创新性。**Pedersen 的理论安全性质正确，不等于它已能接入当前 PLONK/MPC 路径；prover 自己生成随机数正常，也不等于当前 MPC 随机数认证问题已经解决。**
+- 本轮仅为文档勘误，不构成构造可行性证明：dummy trace row 绑定需新增电路约束（`CONSTRUCTED`），独立 `r` 的关联证明属 `FUTURE CANDIDATE` / `UNKNOWN`，均未实现或验证。
 - 未实现任何承诺 gadget、未改源码、未跑 benchmark、未扩展到 C3 递归、未解除任何 HOLD。
 - 本轮完成后等待独立审查，不自动启动 ABA-03-D3。
