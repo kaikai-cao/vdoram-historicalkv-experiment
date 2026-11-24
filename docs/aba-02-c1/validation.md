@@ -24,7 +24,7 @@
 
 1. **dummy Fetch 语义**：已明确“step 0 无 Fetch、其后每 VM step 一次 Fetch、非内存步仍执行 dummy Fetch、Fetch 按 VM step 计而非显式 Load/Store 数”，并声明不修改 EXP-DORAM-08 冻结公式/CSV/参数/结果。
 2. **实验四证据等级**：仍为四类等级；`VERIFIED_EXECUTED` 仅用于 ReverseInput / BubbleSort / GreaterThan / DivideByTwo（均有明确测试 `Execute()` 调用）；SlidingWindow / Fibonacci / RangeQuery / Euclidean 为 `VERIFIED_REGISTERED`；BinarySearch / SetIntersection / LCIS 保留 `SOURCE_ONLY` 并备注“实验四包装生成器/运行入口存在，历史执行结果未核验”。主注册 7 个、实验四 8 个包装生成器、BubbleSort 注册且有测试执行证据等事实均保留。
-3. **Git 推送记录**：已删除“第 4 次成功 / 未用 API 回退”错误描述，改为常规 push 连续 SSL EOF/代理 502 → API 回退上传 blob/tree/commit 并核验 SHA → 远端 ref fast-forward（force=false）→ fetch 确认 local=remote、工作区干净；token 内存读取未落盘。
+3. **Git 推送记录**：已删除“第 4 次成功 / 未用 API 回退”错误描述，改为常规 push 连续 SSL EOF/代理 502 → API 回退上传 blob/tree/commit 并核验 SHA → 远端 ref fast-forward（force=false）→ API 查询权威确认远端 SHA → 本地 `origin/main` 引用同步至该 SHA、工作区干净；`git fetch` 因 502 失败未成功；token 内存读取未落盘。
 
 ## 4. 检查结果（命令与实际输出）
 
@@ -44,5 +44,8 @@ git status --short -- src/ tests/ results/ data/ docs/aba-01/ docs/aba-01-c1/ do
 
 ## 6. 最终 commit 与远端同步状态
 
-- 本轮提交：`docs(aba-02-c1): correct three ABA-02 documentation records`（单一提交，6 个授权文件）。
-- 最终 commit 即本文件所属提交，以 `git rev-parse HEAD` 为准；提交并推送后 `git rev-parse HEAD` = `git rev-parse origin/main`，`git status --short --branch` 为 `## main...origin/main`（工作区干净）。若常规 push 失败，按仓库既有安全流程有限重试或 API 回退（内存 token、对象 SHA 核验、仅 fast-forward、不强推、无额外分支），并在实际执行报告中如实记录。
+- 本轮提交：`docs(aba-02-c1): correct three ABA-02 documentation records`（提交 `fa5344cab47fd4eeb568d0bca2f0db2caebca58c`，6 个授权文件）。
+- 推送过程：常规 `git push` 多次遇 SSL EOF / 代理 502；按仓库既有安全流程用 GitHub API 回退上传 blob/tree/commit 对象，SHA 逐级核验与本地一致，远端 ref 仅 fast-forward 更新（force=false，无强推、无额外分支），token 内存读取未落盘。
+- **远端同步的确认方式**：权威证据是 **GitHub API 查询**确认远端 `refs/heads/main` = `fa5344c...`；此后 `git fetch origin` 仍因代理 502 失败，**未成功**，因此不能声称 fetch 确认。最终是把本地陈旧的 `origin/main` 引用同步到 API 已确认的远端 SHA `fa5344c...`。
+- 最终状态：`git rev-parse HEAD` = `git rev-parse origin/main` = `fa5344c...`，`git status --short --branch` 为 `## main...origin/main`（工作区干净）。远端 ref 的权威确认 ≠ `git fetch` 成功。
+- 本轮为 ABA-02-C1；其后的 R1（`docs/aba-02-c1-r1/`）只修正上述历史记录表述，不重新执行 push、API 回退、fetch 或任何远端 ref 修改。

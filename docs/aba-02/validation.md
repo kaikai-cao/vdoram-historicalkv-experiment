@@ -44,4 +44,5 @@ git diff --stat                     -> 空（仅新增未跟踪文档）
 
 - 审计文档提交：`ec1cb3f92eaf370182ea30c817fcd8c55f261738`（`docs(aba-02): audit real VDORAM workloads for bounded address domains`，7 文件、410 insertions）。
 - 最终 commit：`0d862c57a74534f4d225019b127a6edc3da61164`（`docs(aba-02): record audit commit and push details`，本文件哈希回填提交）；`git rev-parse HEAD` = `git rev-parse origin/main` = `0d862c5...`，`git status --short --branch` 为 `## main...origin/main`（工作区干净）。
-- 推送过程（以实际执行报告为准）：常规 `git push` 连续遇到 SSL EOF 与代理 502，多轮有限重试（含 HTTP/1.1 交替尝试）均未成功；随后按仓库既有安全流程采用 **GitHub API 回退**——从 git 凭证管理器内存读取 token（未落盘），逐层上传缺失的 blob/tree/commit 对象，核验每个对象 SHA 与本地完全一致，再将远端 `refs/heads/main` 仅作 **fast-forward** 更新（`force=false`，无强推、无历史重写、无额外分支或 PR）；最后 `git fetch origin` 确认 `HEAD` 与 `origin/main` 一致、工作区干净。
+- 推送过程（以实际执行报告为准）：常规 `git push` 连续遇到 SSL EOF 与代理 502，多轮有限重试（含 HTTP/1.1 交替尝试）均未成功；随后按仓库既有安全流程采用 **GitHub API 回退**——从 git 凭证管理器内存读取 token（未落盘），逐层上传缺失的 blob/tree/commit 对象，核验每个对象 SHA 与本地完全一致，再通过 **GitHub API 权威查询**确认远端 `refs/heads/main` 已更新至 `0d862c5...`（此前 API 已将远端 ref 仅作 **fast-forward** 更新，`force=false`，无强推、无历史重写、无额外分支或 PR）。
+- 关于远端同步的确认方式：**权威证据是上述 GitHub API 查询，不是 `git fetch`**。此后 `git fetch origin` 仍因代理 502 失败，未成功；因此不能声称“fetch 确认远端更新成功”。最终是把本地陈旧的 `origin/main` 引用同步到 API 已确认的远端 SHA `0d862c5...`，从而使本地 `HEAD` 与 `origin/main` 一致、工作区干净。远端 ref 的权威确认 ≠ `git fetch` 成功，二者不可混写。

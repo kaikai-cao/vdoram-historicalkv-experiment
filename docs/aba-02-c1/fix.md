@@ -35,7 +35,9 @@
 
 **原问题**：`docs/aba-02/validation.md` 写“短超时重试第 4 次成功，未用 API 回退”，与实际执行报告不符。
 
-**修正方式**：按实际执行报告重写第 5 节——常规 `git push` 连续遇到 SSL EOF 与代理 502、多轮有限重试（含 HTTP/1.1 交替）均未成功；随后按仓库既有安全流程采用 GitHub API 回退：从 git 凭证管理器内存读取 token（未落盘），逐层上传 blob/tree/commit 对象并核验 SHA 与本地一致，远端 ref 仅作 fast-forward 更新（`force=false`，无强推、无历史重写、无额外分支或 PR）；最后 `git fetch origin` 确认 `HEAD` 与 `origin/main` 一致、工作区干净。删除“第 4 次成功”“未使用 API 回退”等错误描述，并写入真实最终 commit `0d862c57a74534f4d225019b127a6edc3da61164`。
+**修正方式**：按实际执行报告重写第 5 节——常规 `git push` 连续遇到 SSL EOF 与代理 502、多轮有限重试（含 HTTP/1.1 交替）均未成功；随后按仓库既有安全流程采用 GitHub API 回退：从 git 凭证管理器内存读取 token（未落盘），逐层上传 blob/tree/commit 对象并核验 SHA 与本地一致，远端 `refs/heads/main` 仅作 fast-forward 更新（`force=false`，无强推、无历史重写、无额外分支或 PR）；**通过 GitHub API 查询权威确认远端 ref 已更新至最终 commit**，而后续 `git fetch origin` 仍因代理 502 失败、未成功；最后把本地陈旧的 `origin/main` 引用同步到 API 已确认的远端 SHA，使本地 `HEAD` 与 `origin/main` 一致、工作区干净。删除“第 4 次成功”“未使用 API 回退”“fetch 确认远端更新成功”等错误描述，并写入真实最终 commit `0d862c57a74534f4d225019b127a6edc3da61164`。
+
+需强调：远端 ref 的权威确认来自 **GitHub API 查询**，不是 `git fetch` 成功；本条 C1 勘误在 R1 中再次收紧该表述（见 `docs/aba-02-c1-r1/`）。
 
 ## 本轮不改变的内容
 
