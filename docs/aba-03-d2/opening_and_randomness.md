@@ -10,13 +10,15 @@
 
 ## 0. 必须区分的五类性质
 
-| 性质 | 含义 | 当前状态 |
-| --- | --- | --- |
-| 密码学 binding | 不同 `(addr,r)` 难以给出同一 `com`（或反之） | MiMC `UNKNOWN`（无归约）；Pedersen `INFERRED`（DL 假设，生成器信任 `UNKNOWN`） |
-| 随机数不可预测性 | `r` 在承诺前不可被 verifier 之外预测（hiding 所需） | 取决于产生者；现状 `UNKNOWN`（见 §3） |
-| 随机数认证性 | 参与方不能篡改 `r` 而不被发现（MAC / SPDZ） | 当前 CompatCircuit 路径 additive-only 无 MAC → `BLOCKED`（`exp-doram-06` B.1/B.4） |
-| 随机数防重放 | `r` 一次一用、绑定实例，不能跨步/跨执行复用 | 无机制 → `UNKNOWN` |
-| prover 选择参数/setup | prover 能否自行选生成器或重新 setup | 现场 `test_rng()` 生成 vk（`plonk.rs:302-304`）`VERIFIED`；承诺生成器固定机制 `UNKNOWN` |
+| 类别 | 性质 | 含义 | 当前状态 |
+| --- | --- | --- | --- |
+| A | 随机数均匀性与保密性 | prover/宿主本地生成随机数是承诺者的正常做法，**不自动破坏 hiding**；条件是满足方案要求的分布，且观察者不可获得 `r` | 宿主 `FieldFactory.Random()` 生成 `enc_key` 是 `VERIFIED`（做法）；其作为 opening `r` 的分布/保密性 `UNKNOWN` |
+| B | 承诺 binding | 同一承诺不应有两份不同消息的 opening；Pedersen 是 DL 假设下的**计算 binding**，不是 perfect binding | MiMC `UNKNOWN`（无归约）；Pedersen `INFERRED`（DL + 生成器信任 `UNKNOWN`）。prover 能选 `r` **不等于**能为同一承诺伪造两份不同 opening |
+| C | 随机数复用 | 复用可能造成承诺链接、消息关系泄露或其他方案相关风险 | `INFERRED`（方案相关）；不得写成所有复用都直接破坏 binding |
+| D | MPC 随机数认证 | 多方参与时，参与方不能篡改 share 或 `r` 而不被发现 | 当前 additive-only、无 MAC、无可用 Beaver triple 路径 → 主动安全随机数认证 `BLOCKED`；不得据此推断所有 prover 本地随机数生成都不安全 |
+| E | 防重放 | 随机数本身不是防重放机制；需可信 `execution_id`、`step`、program/context 绑定与 verifier 检查 | 无机制 → `UNKNOWN` |
+
+另有独立事项：prover 能否自行选生成器或重新 setup，与“prover 本地选 `r`”不是同一问题。当前 compat 路径现场 `test_rng()` 生成 vk（`plonk.rs:302-304`）为 `VERIFIED`；外部 verifier 的 VK 锚定方式为 `UNKNOWN`（见 `../aba-03-d1/leakage_and_security.md` D6 勘误）。
 
 ---
 
@@ -27,7 +29,7 @@
 ### Q1. `r_vm` 与 `r_fetch` 是否需要相等？
 
 - **不需要相等**，前提是承诺具备 binding：若 `com_vm = com_fetch`，且两侧各自**正确开承诺**（即各自电路内约束 `Commit(context, addr_side; r_side) = com_side`），则 binding 保证 `(addr_vm, r_vm) = (addr_fetch, r_fetch)`，从而 `addr_vm = addr_fetch`。
-- 这是 binding 的定义性推论，与 `r` 是否相同无关。**MiMC 路径此推论依赖未证明的 binding → `UNKNOWN`；Pedersen 路径在 DL 假设成立时可推出 → `INFERRED`。**
+- 这是**条件性推论**，不是无条件数学等式：必须同时满足两电路各自正确约束自己的 opening、使用同一个承诺、且该承诺的 binding 成立；与两侧 `r` 是否相同无关。**MiMC 路径依赖未证明的 binding → `UNKNOWN`；Pedersen 路径在 DL 假设成立时得出计算 binding → `INFERRED`。**
 
 ### Q2. 两边能否分别持有不同 opening randomness？
 
@@ -36,7 +38,7 @@
 
 ### Q3. 在什么 binding 假设下，相同承诺推出相同地址（即使 r 不同）？
 
-- **Pedersen**：DL 假设 + `G/H` 无已知关系 → 完美 binding → 相同 `C` 唯一确定 `(addr, r)` → `addr_vm = addr_fetch`。`INFERRED`。
+- **Pedersen**：DL 假设 + `G/H` 无已知关系 → 计算 binding。若同一 `C` 有两份 `m != m'` 的 opening，则 `mG + rH = m'G + r'H` 给出 `(m−m')G = (r'−r)H`，可直接导出生成元间的 DL 关系；DL 困难时这种碰撞不可行。因此**在两电路各自正确约束 opening、使用同一 `C` 且 binding 成立**时推出 `addr_vm = addr_fetch`，不是无条件等式，也不是 perfect binding。`INFERRED`。
 - **MiMC 哈希**：需把 `H` 建模为抗碰撞/随机预言机，且 `com = H(context‖addr‖r)` 的编码无歧义；抗碰撞意味着不能找到两个不同 `(addr,r)` 同像。源码无此归约 → `UNKNOWN`。
 - 关键：**相同承诺 + 弱/无 binding 不能推出相同地址**。若 `H` 可被构造碰撞，攻击者可令 `(addr_vm,r_vm) ≠ (addr_fetch,r_fetch)` 但 `com` 相同，verifier 的相等检查通过而地址不等。
 
@@ -45,51 +47,46 @@
 - 若设计改为强制 `r_vm = r_fetch = r`（例如为简化 opening），则必须让 verifier 能核对这一点：把 `r` 作为**公开承诺的一部分**（例如 `com_r = Commit(r; r′)` 公开、两电路都绑定 `com_r`），或把 `r` 提升为公开输入（牺牲 `r` 的隐私，进而牺牲 hiding）。
 - 当前上游无任何跨电路共享随机值机制；`enc_key` 只在单执行内部逐电路宿主比对（`ZkProgramExecutor.cs:176-181,302-308,551-554`），不是共享公开承诺。`CONSTRUCTED` + `UNKNOWN`。
 
-**结论**：推荐设计应让 `r_vm ≠ r_fetch`（各自持有），依赖 binding 推出地址相等；但这把全部安全性压在 binding 上，而 MiMC binding 未证、Pedersen 接口不兼容（见 `commitment_candidates.md`）。
+**结论**：推荐设计应让 `r_vm ≠ r_fetch`（各自持有），在“两电路各自正确约束 opening + 使用同一承诺 + binding 成立”的前提下推出地址相等；这不是无条件数学等式。该设计把关键推理压在 binding 上，而 MiMC binding 未证、Pedersen 虽在 DL 假设下有计算 binding 但接口不兼容（见 `commitment_candidates.md`）。
 
 ---
 
-## 2. 随机数攻击面（问题 5-7）
+## 2. 随机数主体、攻击面与重放（Q5-Q9）
 
-### Q5. 随机数由谁产生？
+### Q5. 谁可以产生随机数，谁能观察随机数？
 
-候选产生者及现状：
+- **prover/宿主本地产生**：承诺者自己选 `r` 是承诺方案的正常做法，**不自动破坏 hiding**；前提是 `r` 满足方案要求的分布（如均匀）且观察者不可获得。当前 `enc_key = FieldFactory.Random()` 是宿主进程现场生成、作为私有输入注入（`ZkProgramExecutor.cs:61,159,288,540`）：`VERIFIED`（做法）；其作为 opening `r` 的分布/保密性 `UNKNOWN`。
+- **verifier 提供**：不可预测性由 verifier 保证；prover 见到 `r` 不必然破坏 hiding（prover 本就知道地址），但需定义传输与隐私语义。当前无此接口 → `UNKNOWN`。
+- **MPC 联合生成**：理想情况下参与方共同产生不可预测、认证的 `r`；当前 additive-only、无 MAC、无可用 Beaver triple → `BLOCKED`。
+- **观察者可见的值**：公开承诺 `com` 按设计不应泄露 `r`（Pedersen perfect hiding 条件于 `r` 均匀且保密；MiMC 条件于哈希假设）。日志、宿主摘要检查、JSON witness/share 的可见性沿用 §3 的证据等级，不在此处升级。
 
-| 产生者 | 性质 | 当前证据 |
-| --- | --- | --- |
-| prover 本地 | 可自由选/重采样 → hiding 与防重放失效，可枚举 `addr` 后重选 `r` 命中目标 `com` | 现状若无约束即等同此类，`UNKNOWN` |
-| verifier 提供 | 不可预测性由 verifier 保证；但需把 `r` 交给 prover 做 witness，泄露 `r` 给 prover 不破坏 hiding（prover 本就知道地址） | 当前无此接口，`UNKNOWN` |
-| MPC 协议联合生成 | 理想：参与方共同产生不可预测、认证、不可重放的 `r`；需 MAC + 一次性 ID | 当前 additive-only 无 MAC、无 Beaver/preprocessing、`DummyFieldTripleSource` 常量三元组（`exp-doram-06` B.1/B.3）→ `BLOCKED` |
-| 宿主 `FieldFactory.Random()` | 当前 `enc_key` 的做法（`ZkProgramExecutor.cs:61`）：进程内伪随机，作为私有输入注入 | `VERIFIED`（做法）；用于承诺 openings 的适配 `UNKNOWN` |
+### Q6. 谁能篡改 MPC share？
 
-### Q6. prover 可自由选择/重采样随机数会造成什么攻击？
+- 若承诺生成走多方 MPC，能提交或替换 share 的一方可篡改 `r` 或 opening 值；需要 MAC/SPDZ 或可信方固定才能检测。当前 CompatCircuit → PLONK 使用 `honest_but_curious::MpcField`（additive），`SpdzFieldShare::mac()` 走 cheat、`ALLOW_CHEATING=true`、序列化 `unimplemented!()`（`exp-doram-06` B.1-B.3）→ 当前架构下主动安全随机数认证 `BLOCKED`。
+- 该阻断针对**现有 MPC 路径中的认证随机数**，**不得**据此推断所有 prover 本地随机数生成都不安全；也不等于“攻击者已能伪造承诺”。
+- 若改用 verifier 固定 `r`（不经 MPC 认证），可绕开此阻断，但引入 `r` 的传递/隐私设计问题 → `UNKNOWN`。
 
-- **枚举 + 重采样**：小地址域下 prover 枚举 `addr`，对每个候选计算所需 `r` 使承诺匹配目标 — 若 `r` 可由 prover 选且 binding 弱，等价于伪造 opening。
-- **事后拟合**：prover 先看到 `com` 再选 `r`，破坏 hiding 的不可预测前提。
-- **重放**：同一 `r`+`addr` 复用产生相同 `com`，可跨 step/程序/执行拼接。
-- 现状：无机制阻止这些；`CONSTRUCTED`（攻击面分析）+ `UNKNOWN`（是否实际可利用在本轮不验证）。
+### Q7. 谁能重放承诺？
 
-### Q7. 随机数是否需要 MPC MAC 认证？
+- 能重用同一 `com`（及其公开 statement）的一方即可跨 step/程序/执行重放；是否成立依赖公开 statement 是否含可信 `execution_id`、`step`、`program_id/context` 与 verifier 检查（`context_and_replay.md`）。当前四字段无 verifier 可信锚定 → `UNKNOWN`。
+- 随机数是否随机**不是**防重放机制：换一个新 `r` 不阻止旧 `com` 被重放，`r` 复用也不自动等于重放成功；需 context 绑定与 verifier 检查共同闭合。
+- 当前 `enc_key` 每执行生成一次（`ZkProgramExecutor.cs:61`），但未证明其作为 `r` 的实例唯一性或跨执行不可复用性 → `VERIFIED`（每执行一值）+ `UNKNOWN`（承诺适配）。
 
-- **需要**：若承诺安全性要求 prover 不能篡改/重采样 `r`，且证明生成在多 MPC 参与方间进行，则 `r` 必须是认证共享（SPDZ MAC）或由可信方固定。
-- **当前不具备**：CompatCircuit → PLONK 静态使用 `honest_but_curious::MpcField`（additive），`SpdzFieldShare` 走 `mac()` cheat、`ALLOW_CHEATING=true`、序列化 `unimplemented!()`（`exp-doram-06` B.1-B.3）→ `BLOCKED`。
-- 若改用 verifier 固定 `r`（不经 MPC 认证），可绕开此阻断，但引入 verifier 与 prover 的 `r` 传递/隐私设计问题（`UNKNOWN`）。
+### Q8. 谁能为同一承诺找到不同 opening？
 
-**结论**：随机数认证性在现有 MPC 路径下是**明确阻断项**；这是 C2 能否落地的关键分歧点。
+- 这是承诺 **binding** 问题，与“谁能产生/选择 `r`”分开。prover 能自行选 `r` 只说明它控制生成，**不代表**能为同一 `com` 给出两个不同消息的 opening。
+- 若 `mG + rH = m'G + r'H` 且 `m != m'`，则 `(m−m')G = (r'−r)H` 直接给出生成元间的 DL 关系（非平凡，因为 `m−m' != 0`）。因此 Pedersen 的 binding 依赖离散对数困难，是 **computational binding**，不是 perfect binding；生成器可验证固定/无陷门仍 `UNKNOWN`。MiMC 侧无公开归约 → `UNKNOWN`。
+- 随机数复用可能造成承诺链接或消息关系泄露（`INFERRED`，方案相关），但**不得**写成所有随机数复用都直接破坏 binding；是否产生两份不同消息的 opening 要看承诺方案与电路对 opening 的约束。
+- 跨电路推出相同地址需：两电路各自正确约束 opening + 使用同一承诺 + binding 成立；不是无条件数学等式（见 Q1/Q3、`circuit_interface.md`）。
+
+### Q9. 中止、重启与重新初始化时如何处理随机数？
+
+- 执行中止后若沿用旧 `r`，可能造成承诺链接或重放风险；需要明确“换全新 `r`、重新绑定 `execution_id/step/context`、verifier 检查”的状态机。当前无文档化协议 → `UNKNOWN`。
+- 当前 `enc_key` 随执行实例产生；重启是否重新 `Random()` 属于推测，不作为结论。threat model 中 prover 重新 setup 只是条件性推论（`../aba-03-d1/leakage_and_security.md` D6 勘误），不能假设 prover 被绑定于固定 `r` 来源 → `UNKNOWN`。
 
 ---
 
-## 3. 生命周期其余问题（问题 8-10）
-
-### Q8. 一次性使用 / 防跨执行复用
-
-- 需求：`r` 必须一次一用，并绑定 `execution_id`（见 `context_and_replay.md`）；否则同一承诺可跨执行重放。
-- 现状：`enc_key` 是**每次执行**生成（`ZkProgramExecutor.cs:61`，一次执行一个值），但未证明其作为 opening `r` 的域语义、唯一性保证或跨执行不可复用性。`VERIFIED`（每执行一值）+ `UNKNOWN`（承诺适配）。
-
-### Q9. 生成失败、中止、重启与重新初始化
-
-- 若 `r` 生成后执行中止，重启时必须换全新 `r`，否则重放；需要明确状态机。
-- 当前 `enc_key` 随执行实例产生，重启会重新 `Random()`（推测），但**无文档化的承诺随机数重置协议**；且 threat model 中「prover 重新 setup」是条件性推论（`leakage_and_security.md` D6 勘误 C1），不能假设 prover 被绑定于固定 `r` 来源 → `UNKNOWN`。
+## 3. 随机数泄露通道（沿用原证据等级）
 
 ### Q10. 随机数泄露通道
 
@@ -98,7 +95,7 @@
 | 日志/调试输出 | 未发现记录 `in_enc_key` 明文的日志；但需审计全量日志配置 | `UNKNOWN`（未穷尽） |
 | 宿主检查 | `out_hash_enc_key` 是哈希摘要（`ZkProgramExecutor.cs:176-181`），不直接泄露明值 | `INFERRED` |
 | JSON witness | `in_enc_key` 作为 `AddPrivate` 注入（`ZkProgramExecutor.cs:159,288,540`）；`is_secret_share=true` 时 JSON 存 share 字符串（`plonk.rs:97-110,203-218`），非明文但 share 持有方可见 | `VERIFIED` |
-| `com` 本身 | 若 hiding 成立，`com` 不应泄露 `r`（Pedersen 信息论；MiMC 条件于哈希假设） | `INFERRED` |
+| `com` 本身 | 若 hiding 成立，`com` 不应泄露 `r`（Pedersen perfect hiding 条件于均匀且保密的 `r`；MiMC 条件于哈希假设） | `INFERRED` |
 
 随机数若通过任一通道泄露给 verifier/观察者，小地址域下 hiding 立即失效。
 
@@ -107,9 +104,9 @@
 ## 4. 生命周期状态机（候选，非已实现）
 
 ```
-生成（verifier 或 MPC 联合，非 prover 自由选）
-  → 绑定（写进 context：execution_id、step、program_id）
-  → 一次性使用（每承诺新 r，跨执行不复用）
+生成（prover/宿主本地生成属正常起点；需满足分布与保密性，或在可用时由 verifier/MPC 联合生成）
+  → 绑定（写进 context：execution_id、step、program_id；防重放靠绑定与 verifier 检查，不靠 r 的随机性）
+  → 一次性使用（每承诺新 r；复用风险按方案分别分析，不等同于 binding 失效）
   → 认证（若经 MPC：需 MAC/SPDZ；当前 BLOCKED）
   → 销毁/不复用（中止重启必须重新生成）
 ```
@@ -128,8 +125,8 @@
 
 ## 5. 本阶段结论
 
-1. **`r_vm` 与 `r_fetch` 不必相等**，相同承诺推出相同地址依赖**承诺 binding**，与 `r` 是否相同无关；MiMC binding 未证 → `UNKNOWN`，Pedersen binding `INFERRED`（DL + 生成器信任）。
-2. **随机数认证性是硬阻断**：现有 CompatCircuit → PLONK 是 additive-only、无 MAC、无真实 Beaver/SPDZ 通路（`exp-doram-06` B.1-B.3），无法保证 prover 不重采样/篡改 `r`。
-3. **随机数不可预测性、防重放、中止重启处理均未闭合**；当前 `enc_key` 做法只覆盖"每执行一值"，不足以充当安全 opening randomness。
-4. 若选择 Pedersen（信息论 hiding 优势），随机数走群标量域且需新 share/群运算支持，`BLOCKED`；若选择 MiMC（域兼容），binding 与 hiding 都系于未证假设与随机数质量。
+1. **`r_vm` 与 `r_fetch` 不必相等**；相同承诺推出相同地址以“两电路各自正确约束 opening + 使用同一承诺 + binding 成立”为前提，不是无条件数学等式。MiMC binding 未证 → `UNKNOWN`；Pedersen 是 DL 假设下的计算 binding → `INFERRED`，且生成器信任 `UNKNOWN`。
+2. **当前 MPC 路径中的主动安全随机数认证是硬阻断**：CompatCircuit → PLONK 是 additive-only、无 MAC、无真实 Beaver/SPDZ 通路（`exp-doram-06` B.1-B.3）；这只说明现有架构无法认证 share，不等于所有 prover 本地随机数生成都不安全。
+3. **随机数分布/保密性、防重放、中止重启处理均未闭合**；当前 `enc_key` 只覆盖“每执行一值”，不足以充当安全 opening randomness。防重放需可信 `execution_id`、`step`、program/context 绑定与 verifier 检查，不能靠 `r` 的随机性解决。
+4. 若选择 Pedersen（perfect hiding 优势），随机数走群标量域且需新 share/群运算支持，`BLOCKED`；若选择 MiMC（域兼容），binding 与 hiding 都系于未证假设与随机数质量。Pedersen 的理论性质正确不等于已接入当前 PLONK/MPC 路径。
 5. 这是阻止进入原型的核心未知项之一（见 `decision.md`）。

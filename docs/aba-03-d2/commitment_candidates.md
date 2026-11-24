@@ -54,8 +54,8 @@
 
 | 维度 | 结论 | 标签 |
 | --- | --- | --- |
-| **Binding** | 在离散对数假设下，Pedersen 是完美 binding：不同 `(addr,r)` 给出同一 `C` 意味着找到 `G/H` 的 DL 关系。前提：`G,H` 的生成无已知陷门（setup ,potentially toxic waste）。固定 commit 的 `setup` 用 RNG 生成 generators（`pedersen/mod.rs:50-65`），**是否可验证生成、是否被 verifier 固定，源码未给出** | `INFERRED`（标准性质）+ `UNKNOWN`（生成器信任） |
-| **Hiding** | Pedersen 在 `r` 均匀时信息论 hiding（完美隐藏）——这是相对 MiMC 的实质优势，尤其适合小地址域。前提仍是 `r` 均匀且不可预测 | `INFERRED`（标准性质）+ 条件于 `r` |
+| **Binding** | 在离散对数困难、生成元关系未知等标准条件下，Pedersen 是**计算 binding**，不是完美 binding。若同一承诺满足 `mG + rH = m'G + r'H` 且 `m != m'`，则可推出 `(m−m')G = (r'−r)H`，即两份 opening 直接给出生成元之间的 DL 关系；因此找到这种碰撞等价于破解离散对数，binding 只能是计算安全性质。前提：`G,H` 的生成无已知陷门（setup，potentially toxic waste）。固定 commit 的 `setup` 用 RNG 生成 generators（`pedersen/mod.rs:50-65`），**是否可验证生成、是否被 verifier 固定，源码未给出** | `INFERRED`（标准性质）+ `UNKNOWN`（生成器信任） |
+| **Hiding** | 在 `r` 均匀且保密（观察者不可获得）时，Pedersen 是 **perfect hiding**：`C = mG + rH` 的分布与消息无关，这是相对 MiMC 的实质优势，尤其适合小地址域。前提仍是 `r` 满足方案要求的分布且不为观察者所得 | `INFERRED`（标准性质）+ 条件于 `r` |
 | **小地址域安全性** | 即使 `addr` 可枚举，均匀 `r` 使 `C` 在群中均匀分布，隐藏性不依赖地址空间大小（优于哈希承诺） | `INFERRED` |
 | **随机数要求** | `r ∈ C::ScalarField`（`Randomness<C>(pub C::ScalarField)`，L30）；必须均匀、唯一、不可预测。源码 `UniformRand::rand` 存在（L32-37），但**该随机如何进入 MPC/电路 witness 未被证明路径覆盖** | `VERIFIED`（类型）+ `UNKNOWN`（路径） |
 | **域兼容性** | 约束域 `ConstraintF<C> = C::BaseField::BasePrimeField`（`pedersen/constraints.rs:16`），输入是 `UInt8`（L60），输出 `GG: CurveVar<C, ConstraintF<C>>`（L53）。这与 C# 生成的 **Fr-wire R1CS** 和 `plonk.rs` 的 `MFr` PLONK **不是同一 wire/域模型**；需要额外的域/群适配 | `VERIFIED`（域定义）+ `INFERRED`（不兼容） |
@@ -63,7 +63,9 @@
 | **MPC 兼容性** | 当前证明路径是 additive-only、无 MAC、无 Beaver 文件（`exp-doram-06` B.1-B.3）；群元素的 MPC share 类型 `SpdzGroupShare` 存在但序列化全 `unimplemented!()`（B.2）。把 Pedersen 承诺送入现有 MPC PLONK 需要新 share 类型与群运算支持 | `VERIFIED`（现状）+ `BLOCKED`（当前路径承载） |
 | **实现证据** | 实现**存在于固定 commit**（`crypto-primitives`，`(crh|commitment)/pedersen`，blob 见 §0），但 `plonk.rs` 不引用它，`client.rs` 无 CompatCircuit 分支调用 → **存在但未接入证明路径** | `VERIFIED`（存在 + 未接入） |
 
-**B 小结**：标准密码学性质优于哈希承诺（信息论 hiding、DL binding），且 gadget 实现已在固定 commit 内；但其约束域/群变量模型与 CompatCircuit→PLONK 的 Fr-wire 通路不兼容，接入需要新 share 类型、群运算与可信生成器，**当前路径无法直接承载**。不得因理论性质优良就写成低成本可实现。
+**B 小结**：标准密码学性质优于哈希承诺（perfect hiding、DL 假设下的计算 binding），且 gadget 实现已在固定 commit 内；但其约束域/群变量模型与 CompatCircuit→PLONK 的 Fr-wire 通路不兼容，接入需要新 share 类型、群运算与可信生成器，**当前路径无法直接承载**。不得因理论性质优良就写成低成本可实现。
+
+**跨电路地址一致性**：只有在两电路各自正确约束自己的 opening、使用同一个承诺 `C`，并且该承诺的 binding 成立时，才能推出两侧消息地址相同；这不是无条件数学等式推论。Pedersen 的 binding 是离散对数假设下的计算性质，不能写成 perfect binding；MiMC 侧仍缺公开归约（`UNKNOWN`）。
 
 ---
 
@@ -77,8 +79,8 @@
 
 | 维度 | A. MiMC 哈希承诺 | B. Pedersen 承诺 |
 | --- | --- | --- |
-| Binding | `INFERRED`（轮数/结构）+ `UNKNOWN`（无公开归约） | `INFERRED`（DL 假设）+ `UNKNOWN`（生成器信任） |
-| Hiding | 条件于 `r` 高熵，`CONSTRUCTED`+`INFERRED` | 信息论 hiding（条件于均匀 `r`），`INFERRED` |
+| Binding | `INFERRED`（轮数/结构）+ `UNKNOWN`（无公开归约） | 计算 binding（DL 假设），`INFERRED` + `UNKNOWN`（生成器信任） |
+| Hiding | 条件于 `r` 高熵，`CONSTRUCTED`+`INFERRED` | perfect hiding（条件于均匀且保密的 `r`），`INFERRED` |
 | 小地址域安全性 | 依赖 `r`，否则枚举攻击，`INFERRED` | 均匀 `r` 下不依赖地址大小，`INFERRED` |
 | 随机数要求 | 均匀域元素、唯一、不可预测，`INFERRED` | `ScalarField` 均匀随机，`VERIFIED`（类型）+ `UNKNOWN`（路径） |
 | 域兼容性 | Fr 原生，`VERIFIED` | 群基点域 + `UInt8`/`CurveVar`，`VERIFIED`（不兼容现状） |
@@ -91,5 +93,5 @@
 ## 5. 本阶段结论
 
 - **A（MiMC）**：路径最短（域内、gadget 已有），但 binding 无公开归约、hiding 全系于随机数、无内建 domain separation——安全语义不完整。
-- **B（Pedersen）**：密码学性质最干净（信息论 hiding + DL binding），且 gadget 在固定 commit 内存在；但与当前 Fr-wire / additive-only PLONK 路径**域与 share 模型不兼容**，接入属于显著改造（见 `circuit_interface.md`、`decision.md`）。
+- **B（Pedersen）**：理论性质最干净（perfect hiding + DL 假设下的计算 binding），且 gadget 在固定 commit 内存在；但这不等于已接入当前 PLONK/MPC 路径：其域/share 模型与 Fr-wire / additive-only 通路**不兼容**，接入属于显著改造（见 `circuit_interface.md`、`decision.md`）。
 - 两者都**不能**在本阶段写成"已具备共享隐藏承诺"。binding、hiding、随机数、域/接口四项需分别闭合；下一阶段（`opening_and_randomness.md`、`context_and_replay.md`）逐项处理。
